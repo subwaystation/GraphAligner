@@ -224,15 +224,26 @@ void replaceDigraphNodeIdsWithOriginalNodeIds(vg::Alignment& alignment, const Di
 	}
 }
 
-void runComponentMappings(const vg::Graph& graph, const std::vector<const FastQ*>& fastQs, const std::map<const FastQ*, std::vector<vg::Alignment>>& seedhits, std::vector<vg::Alignment>& alignments, int threadnum, int bandwidth)
+void runComponentMappings(const vg::Graph& graph, const std::vector<const FastQ*>& fastQs, const std::map<const FastQ*, std::vector<vg::Alignment>>& seedhits, std::vector<vg::Alignment>& alignments, int threadnum, int staticBandwidth, double bandwidthStandardDeviation)
 {
 	BufferedWriter cerroutput {std::cerr};
 	BufferedWriter coutoutput {std::cout};
 	for (size_t i = 0; i < fastQs.size(); i++)
 	{
 		const FastQ* fastq = fastQs[i];
+		int bandwidth = staticBandwidth;
+		if (bandwidth == 0)
+		{
+			//assume 15% insertion rate and 2% deletion rate 
+			double insertionMean = fastq->sequence.size() * 0.15;
+			double deletionMean = fastq->sequence.size() * 0.02;
+			double insertionVariance = fastq->sequence.size() * 0.15 * (1.0 - 0.15);
+			double insertionStdDev = sqrt(insertionVariance);
+			bandwidth = insertionMean - deletionMean + insertionStdDev * bandwidthStandardDeviation;
+		}
 		coutoutput << "thread " << threadnum << " " << i << "/" << fastQs.size() << "\n";
 		coutoutput << "read " << fastq->seq_id << " size " << fastq->sequence.size() << "bp" << "\n";
+		coutoutput << "bandwidth " << bandwidth << "\n";
 		coutoutput << "components: " << seedhits.at(fastq).size() << BufferedWriter::Flush;
 		if (seedhits.at(fastq).size() == 0)
 		{
@@ -369,7 +380,7 @@ void runComponentMappings(const vg::Graph& graph, const std::vector<const FastQ*
 	coutoutput << "thread " << threadnum << " finished with " << alignments.size() << " alignments" << BufferedWriter::Flush;
 }
 
-void alignReads(std::string graphFile, std::string fastqFile, std::string seedFile, int numThreads, int bandwidth, std::string alignmentFile)
+void alignReads(std::string graphFile, std::string fastqFile, std::string seedFile, int numThreads, int staticBandwidth, double bandwidthStandardDeviation, std::string alignmentFile)
 {
 
 	vg::Graph graph;
@@ -437,7 +448,7 @@ void alignReads(std::string graphFile, std::string fastqFile, std::string seedFi
 
 	for (int i = 0; i < numThreads; i++)
 	{
-		threads.emplace_back([&graph, &readsPerThread, &seedHits, &resultsPerThread, i, bandwidth]() { runComponentMappings(graph, readsPerThread[i], seedHits, resultsPerThread[i], i, bandwidth); });
+		threads.emplace_back([&graph, &readsPerThread, &seedHits, &resultsPerThread, i, staticBandwidth, bandwidthStandardDeviation]() { runComponentMappings(graph, readsPerThread[i], seedHits, resultsPerThread[i], i, staticBandwidth, bandwidthStandardDeviation); });
 	}
 
 	for (int i = 0; i < numThreads; i++)

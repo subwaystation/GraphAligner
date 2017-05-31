@@ -13,9 +13,10 @@ int main(int argc, char** argv)
 	std::string alignmentFile = "";
 	int numThreads = 0;
 	int bandwidth = 0;
+	double bandwidthStddev = 0;
 	int c;
 
-	while ((c = getopt(argc, argv, "g:f:s:a:t:b:")) != -1)
+	while ((c = getopt(argc, argv, "g:f:s:a:t:b:B:")) != -1)
 	{
 		switch(c)
 		{
@@ -37,22 +38,25 @@ int main(int argc, char** argv)
 			case 'b':
 				bandwidth = std::stoi(optarg);
 				break;
+			case 'B':
+				bandwidthStddev = std::stod(optarg);
+				break;
 		}
 	}
 
 	if (numThreads < 1)
 	{
-		std::cerr << "number of threads must be >= 1" << std::endl;
+		std::cerr << "select number of threads -t" << std::endl;
 		std::exit(0);
 	}
 
-	if (bandwidth < 2)
+	if (bandwidth < 2 && bandwidthStddev < 0.1)
 	{
-		std::cerr << "bandwidth must be >= 2" << std::endl;
+		std::cerr << "select either bandwidth -b or bandwidth standard deviation -B" << std::endl;
 		std::exit(0);
 	}
 
-	alignReads(graphFile, fastqFile, seedFile, numThreads, bandwidth, alignmentFile);
+	alignReads(graphFile, fastqFile, seedFile, numThreads, bandwidth, bandwidthStddev, alignmentFile);
 
 	return 0;
 }
