@@ -2,6 +2,7 @@
 #define GraphAligner_H
 
 //http://biorxiv.org/content/early/2017/04/06/124941
+#include <queue>
 #include <chrono>
 #include <algorithm>
 #include <string>
@@ -155,11 +156,10 @@ public:
 		finalized = true;
 	}
 
-	AlignmentResult AlignOneWay(const std::string& seq_id, const std::string& sequence, int startBandWidth, int dynamicWidth, const std::vector<SeedHit>& seedHits, bool initialFullBand) const
+	AlignmentResult AlignOneWay(const std::string& seq_id, const std::string& sequence, int dynamicWidth, const std::vector<SeedHit>& seedHits, int dynamicStart) const
 	{
 		assert(finalized);
-		auto seedHitsInMatrix = getSeedHitPositionsInMatrix(sequence, seedHits);
-		auto trace = getBacktrace(sequence, startBandWidth, dynamicWidth, seedHitsInMatrix, initialFullBand);
+		auto trace = getBacktrace(sequence, dynamicWidth, dynamicStart);
 		//failed alignment, don't output
 		if (std::get<0>(trace) == std::numeric_limits<ScoreType>::min()) return emptyAlignment();
 		auto result = traceToAlignment(seq_id, sequence, std::get<0>(trace), std::get<2>(trace), std::get<1>(trace));
@@ -178,17 +178,6 @@ private:
 		vg::Alignment result;
 		result.set_score(std::numeric_limits<decltype(result.score())>::min());
 		return AlignmentResult { result, 0, true };
-	}
-
-	std::vector<MatrixPosition> getSeedHitPositionsInMatrix(const std::string& sequence, const std::vector<SeedHit>& seedHits) const
-	{
-		std::vector<MatrixPosition> result;
-		for (size_t i = 0; i < seedHits.size(); i++)
-		{
-			assert(nodeLookup.count(seedHits[i].nodeId) > 0);
-			result.emplace_back(nodeStart[nodeLookup.at(seedHits[i].nodeId)] + seedHits[i].nodePos, seedHits[i].sequencePosition);
-		}
-		return result;
 	}
 
 	AlignmentResult traceToAlignment(const std::string& seq_id, const std::string& sequence, ScoreType score, const std::vector<MatrixPosition>& trace, int maxDistanceFromBand) const
@@ -233,8 +222,50 @@ private:
 		return AlignmentResult { result, maxDistanceFromBand, false };
 	}
 
+	template <typename MatrixType>
+	std::tuple<ScoreType, int, std::vector<MatrixPosition>> backtraceExpandoThingy(LengthType position, const SparseMatrix<MatrixPosition>& backtraceMatrix, const MatrixType& band, const std::string& sequence) const
+	{
+		assert(backtraceMatrix.sizeRows() == sequence.size()+1);
+		assert(backtraceMatrix.sizeColumns() == nodeSequences.size());
+		std::vector<MatrixPosition> trace;
+		MatrixPosition currentPosition = std::make_pair(position, sequence.size());
+		assert(band(currentPosition.first, currentPosition.second));
+		trace.push_back(currentPosition);
+		ScoreType score = 0;
+		while (currentPosition.second > 0)
+		{
+			std::cerr << currentPosition.first << ", " << currentPosition.second << ", " << nodeIDs[indexToNode[currentPosition.first]] << std::endl;
+			assert(band(currentPosition.first, currentPosition.second));
+			assert(currentPosition.second >= 0);
+			assert(currentPosition.second < sequence.size()+1);
+			assert(currentPosition.first >= 0);
+			assert(currentPosition.first < nodeSequences.size());
+			//If we're at the dummy node, we have to stay there
+			if (currentPosition.first == 0) break;
+			assert(backtraceMatrix.exists(currentPosition.first, currentPosition.second));
+			auto newPos = backtraceMatrix(currentPosition.first, currentPosition.second);
+			if (newPos.first == currentPosition.first || newPos.second == currentPosition.second)
+			{
+				score--;
+			}
+			else if (sequence[currentPosition.second] == nodeSequences[currentPosition.first])
+			{
+				score++;
+			}
+			else
+			{
+				score--;
+			}
+			// assert(newPos.second < currentPosition.second || (newPos.second == currentPosition.second && newPos.first < currentPosition.first));
+			currentPosition = newPos;
+			trace.push_back(currentPosition);
+		}
+		std::reverse(trace.begin(), trace.end());
+		return std::make_tuple(score, sequence.size() - score, trace);
+	}
+
 	template <bool distanceMatrixOrder, typename MatrixType>
-	std::tuple<ScoreType, int, std::vector<MatrixPosition>> backtrace(const std::vector<ScoreType>& Mslice, const SparseMatrix<MatrixPosition>& backtraceMatrix, const MatrixType& band, int sequenceLength, const Array2D<LengthType, distanceMatrixOrder>& distanceMatrix, const std::vector<MatrixPosition>& seedHits, const std::vector<LengthType>& maxScorePositionPerRow) const
+	std::tuple<ScoreType, int, std::vector<MatrixPosition>> backtrace(const std::vector<ScoreType>& Mslice, const SparseMatrix<MatrixPosition>& backtraceMatrix, const MatrixType& band, int sequenceLength, const Array2D<LengthType, distanceMatrixOrder>& distanceMatrix, const std::vector<LengthType>& maxScorePositionPerRow) const
 	{
 		assert(backtraceMatrix.sizeRows() == sequenceLength+1);
 		assert(backtraceMatrix.sizeColumns() == nodeSequences.size());
@@ -282,72 +313,6 @@ private:
 		}
 		std::reverse(trace.begin(), trace.end());
 		return std::make_tuple(score, maxMinDistance, trace);
-	}
-
-	void expandBandForwards(std::vector<std::vector<LengthType>>& result, LengthType w, LengthType j, size_t sequenceLength) const
-	{
-		if (std::find(result[j].begin(), result[j].end(), w) != result[j].end()) return;
-		auto nodeIndex = indexToNode[w];
-		auto end = nodeEnd[nodeIndex];
-		while (w != end && j < sequenceLength+1)
-		{
-			result[j].emplace_back(w);
-			w++;
-			j++;
-		}
-		if (w == end && j < sequenceLength+1)
-		{
-			for (size_t i = 0; i < outNeighbors[nodeIndex].size(); i++)
-			{
-				expandBandForwards(result, nodeStart[outNeighbors[nodeIndex][i]], j, sequenceLength);
-			}
-		}
-	}
-
-	void expandBandBackwards(std::vector<std::vector<LengthType>>& result, LengthType w, LengthType j, size_t sequenceLength) const
-	{
-		if (std::find(result[j].begin(), result[j].end(), w) != result[j].end()) return;
-		auto nodeIndex = indexToNode[w];
-		auto start = nodeStart[nodeIndex];
-		while (w != start && j > 0)
-		{
-			result[j].emplace_back(w);
-			w--;
-			j--;
-		}
-		result[j].emplace_back(w);
-		if (w == start && j > 0)
-		{
-			for (size_t i = 0; i < inNeighbors[nodeIndex].size(); i++)
-			{
-				expandBandBackwards(result, nodeEnd[inNeighbors[nodeIndex][i]] - 1, j-1, sequenceLength);
-			}
-		}
-	}
-
-	std::vector<std::vector<LengthType>> getBandLocations(int sequenceLength, const std::vector<MatrixPosition>& seedHits) const
-	{
-		std::vector<std::vector<LengthType>> forwardResult;
-		std::vector<std::vector<LengthType>> backwardResult;
-		backwardResult.resize(sequenceLength+1);
-		forwardResult.resize(sequenceLength+1);
-		backwardResult[0].emplace_back(0);
-		forwardResult[0].emplace_back(0);
-		for (auto hit : seedHits)
-		{
-			expandBandForwards(forwardResult, hit.first, hit.second, sequenceLength);
-			expandBandBackwards(backwardResult, hit.first, hit.second, sequenceLength);
-		}
-		std::vector<std::vector<LengthType>> result;
-		result.resize(sequenceLength+1);
-		for (size_t j = 0; j < sequenceLength+1; j++)
-		{
-			std::set<LengthType> rowResult;
-			rowResult.insert(forwardResult[j].begin(), forwardResult[j].end());
-			rowResult.insert(backwardResult[j].begin(), backwardResult[j].end());
-			result[j].insert(result[j].end(), rowResult.begin(), rowResult.end());
-		}
-		return result;
 	}
 
 	template <typename MatrixType>
@@ -475,8 +440,253 @@ private:
 		}
 	}
 
+	class PriorityPosition
+	{
+	public:
+		PriorityPosition(LengthType matches, LengthType distance, LengthType w, LengthType j, LengthType btw, LengthType btj, LengthType sequenceLength) :
+		matches(matches),
+		distance(distance),
+		position(w, j),
+		backtrace(btw, btj),
+		sequenceLength(sequenceLength)
+		{}
+		LengthType matches;
+		LengthType distance;
+		MatrixPosition position;
+		MatrixPosition backtrace;
+		LengthType sequenceLength;
+		double expectedNumberOfMatches() const
+		{
+			return -(distance-matches);
+			// return matches + ((double)matches + 70.0) / ((double)distance + 100.0) * (sequenceLength - position.second);
+		}
+		//earlier in ordering when exp. num. of matches is more
+		bool operator<(const PriorityPosition& other) const
+		{
+			return expectedNumberOfMatches() < other.expectedNumberOfMatches();
+		}
+	};
+
+	template <typename MatrixType>
+	LengthType getScoreAndPositionWithHeuristicExpandoThingy(const std::string& sequence, SparseMatrix<MatrixPosition>& backtrace, MatrixType& visited) const
+	{
+		std::priority_queue<PriorityPosition> queue;
+		visited.set(0, 0);
+		LengthType sequenceLength = sequence.size();
+		backtrace.set(0, 0, std::make_pair(0, 0));
+		for (LengthType w = 0; w < nodeSequences.size(); w++)
+		{
+			if (nodeSequences[w] == sequence[0])
+			{
+				queue.emplace(1, 1, w, 1, 0, 0, sequenceLength);
+			}
+			else
+			{
+				queue.emplace(0, 1, w, 1, 0, 0, sequenceLength);
+			}
+		}
+		LengthType finalPosition = 0;
+		LengthType maxJ = 0;
+		while (true)
+		{
+			auto picked = queue.top();
+			queue.pop();
+			auto w = picked.position.first;
+			auto j = picked.position.second;
+			auto matches = picked.matches;
+			auto distance = picked.distance;
+			if (visited.get(w, j)) continue;
+			if (j > maxJ)
+			{
+				maxJ = j;
+				std::cerr << maxJ << std::endl;
+			}
+			visited.set(w, j);
+			backtrace.set(w, j, picked.backtrace);
+			if (j == sequence.size())
+			{
+				finalPosition = w;
+				break;
+			}
+			if (!visited.get(w, j+1)) queue.emplace(matches, distance+1, w, j+1, w, j, sequenceLength);
+			auto nodeIndex = indexToNode[w];
+			if (w == nodeEnd[nodeIndex]-1)
+			{
+				for (size_t i = 0; i < outNeighbors[nodeIndex].size(); i++)
+				{
+					auto u = nodeStart[outNeighbors[nodeIndex][i]];
+					if (!visited.get(u, j)) queue.emplace(matches, distance+1, u, j, w, j, sequenceLength);
+					if (!visited.get(u, j+1))
+					{
+						if (sequence[j] == nodeSequences[u])
+						{
+							queue.emplace(matches+1, distance+1, u, j+1, w, j, sequenceLength);
+						}
+						else
+						{
+							queue.emplace(matches, distance+1, u, j+1, w, j, sequenceLength);
+						}
+					}
+				}
+			}
+			else
+			{
+				auto u = w+1;
+				if (!visited.get(u, j)) queue.emplace(matches, distance+1, u, j, w, j, sequenceLength);
+				if (!visited.get(u, j+1))
+				{
+					if (sequence[j] == nodeSequences[u])
+					{
+						queue.emplace(matches+1, distance+1, u, j+1, w, j, sequenceLength);
+					}
+					else
+					{
+						queue.emplace(matches, distance, u, j+1, w, j, sequenceLength);
+					}
+				}
+			}
+		}
+		return finalPosition;
+	}
+
+	template <typename MatrixType>
+	std::pair<LengthType, ScoreType> getScoreAndPositionWithExpandoThingy(const std::string& sequence, SparseMatrix<MatrixPosition>& backtrace, MatrixType& visited, LengthType maxRow) const
+	{
+		if (maxRow > sequence.size()) maxRow = sequence.size();
+		MatrixType optimalBacktraceSet {nodeSequences.size() + 1, maxRow + 1};
+		std::vector<MatrixPosition> currentDistanceQueue;
+		std::vector<MatrixPosition> plusOneDistanceQueue;
+		std::vector<MatrixPosition> plusTwoDistanceQueue;
+		SparseMatrix<ScoreType> distances {nodeSequences.size() + 1, maxRow + 1};
+		for (LengthType w = 0; w < nodeSequences.size(); w++)
+		{
+			backtrace.set(w, 1, std::make_pair(0, 0));
+			if (nodeSequences[w] == sequence[0])
+			{
+				currentDistanceQueue.emplace_back(w, 1);
+			}
+			else
+			{
+				plusTwoDistanceQueue.emplace_back(w, 1);
+			}
+			optimalBacktraceSet.set(w, 1);
+		}
+		ScoreType currentDistance = 0;
+		LengthType finalPosition = 0;
+		size_t processed = 0;
+		while (true)
+		{
+			if (currentDistanceQueue.size() == 0)
+			{
+				currentDistanceQueue = std::move(plusOneDistanceQueue);
+				plusOneDistanceQueue = std::move(plusTwoDistanceQueue);
+				plusTwoDistanceQueue.clear();
+				currentDistance += 1;
+				assert(currentDistance < sequence.size());
+			}
+			auto picked = currentDistanceQueue.back();
+			currentDistanceQueue.pop_back();
+			processed++;
+			auto w = picked.first;
+			auto j = picked.second;
+			if (visited.get(w, j)) continue;
+			distances.set(w, j, currentDistance);
+			optimalBacktraceSet.set(w, j);
+			visited.set(w, j);
+			if (j == maxRow)
+			{
+				finalPosition = w;
+				break;
+			}
+			if (!optimalBacktraceSet.get(w, j+1))
+			{
+				plusOneDistanceQueue.emplace_back(w, j+1);
+				backtrace.set(w, j+1, std::make_pair(w, j));
+			}
+			auto nodeIndex = indexToNode[w];
+			if (w == nodeEnd[nodeIndex]-1)
+			{
+				for (size_t i = 0; i < outNeighbors[nodeIndex].size(); i++)
+				{
+					auto u = nodeStart[outNeighbors[nodeIndex][i]];
+					if (!optimalBacktraceSet.get(u, j))
+					{
+						plusOneDistanceQueue.emplace_back(u, j);
+						backtrace.set(u, j, std::make_pair(w, j));
+					}
+					if (sequence[j] == nodeSequences[u])
+					{
+						if (!optimalBacktraceSet.get(u, j+1))
+						{
+							currentDistanceQueue.emplace_back(u, j+1);
+							backtrace.set(u, j+1, std::make_pair(w, j));
+							optimalBacktraceSet.set(u, j+1);
+						}
+					}
+					else
+					{
+						if (!optimalBacktraceSet.get(u, j+1))
+						{
+							plusTwoDistanceQueue.emplace_back(u, j+1);
+							backtrace.set(u, j+1, std::make_pair(w, j));
+						}
+					}
+				}
+			}
+			else
+			{
+				auto u = w+1;
+				if (!optimalBacktraceSet.get(u, j))
+				{
+					plusOneDistanceQueue.emplace_back(u, j);
+					backtrace.set(u, j, std::make_pair(w, j));
+				}
+				if (sequence[j] == nodeSequences[u])
+				{
+					if (!optimalBacktraceSet.get(u, j+1))
+					{
+						currentDistanceQueue.emplace_back(u, j+1);
+						backtrace.set(u, j+1, std::make_pair(w, j));
+						optimalBacktraceSet.set(u, j+1);
+					}
+				}
+				else
+				{
+					if (!optimalBacktraceSet.get(u, j+1))
+					{
+						plusTwoDistanceQueue.emplace_back(u, j+1);
+						backtrace.set(u, j+1, std::make_pair(w, j));
+					}
+				}
+			}
+		}
+		LengthType scoreW = finalPosition;
+		LengthType scoreJ = maxRow;
+		ScoreType score = 0;
+		while (scoreJ > 0)
+		{
+			auto nextPos = backtrace.get(scoreW, scoreJ);
+			if (nextPos.first == scoreW || nextPos.second == scoreJ)
+			{
+				score--;
+			}
+			else if (sequence[scoreJ-1] == nodeSequences[scoreW])
+			{
+				score++;
+			}
+			else
+			{
+				score--;
+			}
+			scoreW = nextPos.first;
+			scoreJ = nextPos.second;
+		}
+		assert(currentDistance < maxRow);
+		return std::make_pair(finalPosition, score);
+	}
+
 	template<bool distanceMatrixOrder, typename MatrixType>
-	MatrixSlice getScoreAndBacktraceMatrix(const std::string& sequence, bool hasWrongOrders, const Array2D<LengthType, distanceMatrixOrder>& distanceMatrix, MatrixSlice& previous, int dynamicWidth, MatrixType& band, SparseMatrix<MatrixPosition>& backtrace) const
+	MatrixSlice getScoreAndBacktraceMatrix(const std::string& sequence, const Array2D<LengthType, distanceMatrixOrder>& distanceMatrix, MatrixType& band, SparseMatrix<MatrixPosition>& backtrace) const
 	{
 		std::vector<ScoreType> M1;
 		std::vector<ScoreType> M2;
@@ -488,17 +698,17 @@ private:
 		std::vector<MatrixPosition> Rbacktrace2;
 		std::vector<LengthType> maxScorePositionPerRow;
 		maxScorePositionPerRow.resize(sequence.size()+1, 0);
-		assert(previous.M.size() == nodeSequences.size());
-		assert(previous.R.size() == nodeSequences.size());
-		assert(previous.Q.size() == nodeSequences.size());
-		assert(previous.Rbacktrace.size() == nodeSequences.size());
-		assert(previous.Qbacktrace.size() == nodeSequences.size());
 		MatrixSlice result;
 		std::vector<MatrixPosition> Qbacktrace;
 		M1.resize(nodeSequences.size());
 		Q1.resize(nodeSequences.size());
 		R1.resize(nodeSequences.size());
+		M2.resize(nodeSequences.size());
+		Q2.resize(nodeSequences.size());
+		R2.resize(nodeSequences.size());
+		Qbacktrace.resize(nodeSequences.size());
 		Rbacktrace1.resize(nodeSequences.size());
+		Rbacktrace2.resize(nodeSequences.size());
 		std::vector<ScoreType>& currentM = M1;
 		std::vector<ScoreType>& previousM = M2;
 		std::vector<ScoreType>& currentQ = Q1;
@@ -507,11 +717,6 @@ private:
 		std::vector<ScoreType>& previousR = R2;
 		std::vector<MatrixPosition>& currentRbacktrace = Rbacktrace1;
 		std::vector<MatrixPosition>& previousRbacktrace = Rbacktrace2;
-		previousM = std::move(previous.M);
-		previousQ = std::move(previous.Q);
-		previousR = std::move(previous.R);
-		Qbacktrace = std::move(previous.Qbacktrace);
-		previousRbacktrace = std::move(previous.Rbacktrace);
 		currentR[dummyNodeStart] = std::numeric_limits<ScoreType>::min() + gapContinuePenalty + 100;
 		previousR[dummyNodeStart] = std::numeric_limits<ScoreType>::min() + gapContinuePenalty + 100;
 		currentM[dummyNodeStart] = -gapPenalty(1);
@@ -521,14 +726,17 @@ private:
 		currentM[dummyNodeEnd] = -gapPenalty(sequence.size() - 1);
 		previousM[dummyNodeEnd] = -gapPenalty(sequence.size());
 		auto previousProcessableColumnsAndOrder = getProcessableColumns(band, 0);
-		LengthType previousRowMaximumIndex = 0;
+		// LengthType previousRowMaximumIndex = startColumn;
+		// previousM[previousRowMaximumIndex] = startScore;
+
+		// band.set(dummyNodeStart, startRow);
+		// band.set(dummyNodeEnd, startRow);
 
 		for (LengthType j = 1; j < sequence.size()+1; j++)
 		{
-			if (j >= 100)
-			{
-				expandBandDynamically(band, previousRowMaximumIndex, j, dynamicWidth);
-			}
+			band.set(dummyNodeStart, j);
+			band.set(dummyNodeEnd, j);
+			// expandBandDynamically(band, previousRowMaximumIndex, j, dynamicWidth);
 			auto currentProcessableColumnsAndOrder = getProcessableColumns(band, j);
 			auto& previousProcessableColumns = previousProcessableColumnsAndOrder.second;
 			auto& currentProcessableColumns = currentProcessableColumnsAndOrder.second;
@@ -539,7 +747,17 @@ private:
 			LengthType maxScorePosition = dummyNodeStart;
 			ScoreType maxScore = currentM[dummyNodeStart];
 			std::vector<std::pair<LengthType, ScoreType>> Rhelper;
-			if (hasWrongOrders) Rhelper = getRHelper(j, previousM, sequence, band, previousProcessableColumns);
+			if (hasWrongOrders)
+			{
+				if (j > 1)
+				{
+					Rhelper = getRHelper(j, previousM, sequence, band, previousProcessableColumns);
+				}
+				else
+				{
+					Rhelper = getRHelperZero();
+				}
+			}
 
 			for (LengthType w : currentProcessableColumns)
 			{
@@ -639,6 +857,7 @@ private:
 				assert(currentM[w] <= std::numeric_limits<ScoreType>::max() - 100);
 				backtrace.set(w, j, foundBacktrace);
 				assert(foundBacktrace.second < j || (foundBacktrace.second == j && foundBacktrace.first < w));
+				assert(band.get(foundBacktrace.first, foundBacktrace.second));
 				if (currentM[w] > maxScore)
 				{
 					maxScore = currentM[w];
@@ -649,7 +868,7 @@ private:
 			currentM[dummyNodeEnd] = maxScore - gapPenalty(sequence.size() - j);
 			backtrace.set(dummyNodeEnd, j, std::make_pair(maxScorePosition, j));
 
-			previousRowMaximumIndex = maxScorePosition;
+			// previousRowMaximumIndex = maxScorePosition;
 			maxScorePositionPerRow[j] = maxScorePosition;
 
 			std::swap(currentM, previousM);
@@ -668,124 +887,19 @@ private:
 		return result;
 	}
 
-	template <typename MatrixType>
-	void expandBandRightwards(MatrixType& matrix, LengthType w, LengthType j, int bandWidth) const
+	std::tuple<ScoreType, int, std::vector<MatrixPosition>> getBacktrace(const std::string& sequence, int dynamicWidth, int dynamicStartRow) const
 	{
-		auto nodeIndex = indexToNode[w];
-		auto end = nodeEnd[nodeIndex];
-		while (w != end && bandWidth > 0)
-		{
-			matrix.set(w, j);
-			w++;
-			bandWidth--;
-			if (w != end && matrix(w, j)) return;
-		}
-		if (w == end && bandWidth > 0)
-		{
-			for (size_t i = 0; i < outNeighbors[nodeIndex].size(); i++)
-			{
-				expandBandRightwards(matrix, nodeStart[outNeighbors[nodeIndex][i]], j, bandWidth);
-			}
-		}
-	}
-
-	template <typename MatrixType>
-	void expandBandLeftwards(MatrixType& matrix, LengthType w, LengthType j, int bandWidth) const
-	{
-		auto nodeIndex = indexToNode[w];
-		auto start = nodeStart[nodeIndex];
-		while (w != start && bandWidth > 0)
-		{
-			matrix.set(w, j);
-			w--;
-			bandWidth--;
-			if (w != start && matrix(w, j)) return;
-		}
-		if (w == start && bandWidth > 0)
-		{
-			matrix.set(w, j);
-			for (size_t i = 0; i < inNeighbors[nodeIndex].size(); i++)
-			{
-				expandBandLeftwards(matrix, nodeEnd[inNeighbors[nodeIndex][i]] - 1, j, bandWidth-1);
-			}
-		}
-	}
-
-	SparseBoolMatrix<SliceRow<LengthType>> getBandedRows(const std::vector<MatrixPosition>& seedHits, int bandWidth, size_t sequenceLength) const
-	{
-		auto bandLocations = getBandLocations(sequenceLength, seedHits);
-		SparseBoolMatrix<SliceRow<LengthType>> result {nodeSequences.size(), sequenceLength+1};
-		for (LengthType j = 0; j < 100 && j < sequenceLength+1; j++)
-		{
-			for (size_t i = 0; i < bandLocations[j].size(); i++)
-			{
-				result.set(bandLocations[j][i], j);
-				expandBandRightwards(result, bandLocations[j][i], j, bandWidth);
-				expandBandLeftwards(result, bandLocations[j][i], j, bandWidth);
-			}
-		}
-		for (LengthType j = 0; j < sequenceLength+1; j++)
-		{
-			result.set(dummyNodeStart, j);
-			result.set(dummyNodeEnd, j);
-		}
-		return result;
-	}
-
-	SparseBoolMatrix<SliceRow<LengthType>> getFullBand(size_t sequenceLength) const
-	{
-		SparseBoolMatrix<SliceRow<LengthType>> result {nodeSequences.size(), sequenceLength+1};
-		for (LengthType j = 0; j < 100 && j < sequenceLength+1; j++)
-		{
-			for (size_t i = 0; i < nodeSequences.size(); i++)
-			{
-				result.set(i, j);
-			}
-		}
-		return result;
-	}
-
-	std::tuple<ScoreType, int, std::vector<MatrixPosition>> getBacktrace(const std::string& sequence, int startBandWidth, int dynamicWidth, const std::vector<MatrixPosition>& seedHits, bool initialFullBand) const
-	{
-		SparseBoolMatrix<SliceRow<LengthType>> band {1, 1};
-		if (initialFullBand)
-		{
-			band = getFullBand(sequence.size());
-		}
-		else
-		{
-			band = getBandedRows(seedHits, startBandWidth, sequence.size());
-		}
 		auto distanceMatrix = getDistanceMatrixBoostJohnson();
-		bool hasWrongOrders = false;
 		SparseMatrix<MatrixPosition> backtraceMatrix {nodeSequences.size(), sequence.size() + 1};
-		MatrixSlice lastRow = getFirstSlice(backtraceMatrix);
-		int sliceSize = sequence.size();
-		auto slice = getScoreAndBacktraceMatrix(sequence, hasWrongOrders, distanceMatrix, lastRow, dynamicWidth, band, backtraceMatrix);
-		auto result = backtrace(slice.M, backtraceMatrix, band, sequence.size(), distanceMatrix, seedHits, slice.maxScorePositionPerRow);
-		return result;
-	}
-
-	MatrixSlice getFirstSlice(SparseMatrix<MatrixPosition>& backtrace) const
-	{
-		MatrixSlice result;
-		result.M.resize(nodeSequences.size(), 0);
-		result.R.resize(nodeSequences.size(), 0);
-		result.Q.resize(nodeSequences.size(), 0);
-		result.Rbacktrace.reserve(nodeSequences.size());
-		result.Qbacktrace.reserve(nodeSequences.size());
-		for (LengthType i = 0; i < nodeSequences.size(); i++)
-		{
-			backtrace.set(i, 0, std::make_pair(i, 0));
-			result.Qbacktrace.emplace_back(i, 0);
-			result.Rbacktrace.emplace_back(i, 0);
-		}
-		result.R[0] = std::numeric_limits<ScoreType>::min() + gapContinuePenalty + 100;
-		assert(result.M.size() == nodeSequences.size());
-		assert(result.R.size() == nodeSequences.size());
-		assert(result.Q.size() == nodeSequences.size());
-		assert(result.Rbacktrace.size() == nodeSequences.size());
-		assert(result.Qbacktrace.size() == nodeSequences.size());
+		SparseBoolMatrix<SliceRow<LengthType>> band {nodeSequences.size() + 1, sequence.size() + 1};
+		auto foundHeuristic = getScoreAndPositionWithHeuristicExpandoThingy(sequence, backtraceMatrix, band);
+		auto result = backtraceExpandoThingy(foundHeuristic, backtraceMatrix, band, sequence);
+		// auto dynamicStart = getScoreAndPositionWithExpandoThingy(sequence, backtraceMatrix, band, dynamicStartRow);
+		auto expandoCells = band.totalOnes();
+		std::cerr << "number of expando cells: " << expandoCells << std::endl;
+		// auto slice = getScoreAndBacktraceMatrix(sequence, distanceMatrix, band, backtraceMatrix);
+		// auto result = backtrace(slice.M, backtraceMatrix, band, sequence.size(), distanceMatrix, slice.maxScorePositionPerRow);
+		// std::cerr << "number of dynamic cells: " << (band.totalOnes() - expandoCells) << std::endl;
 		return result;
 	}
 
@@ -1173,7 +1287,7 @@ private:
 		{
 			assert(chainStart[i] != std::numeric_limits<size_t>::max());
 			assert(distanceOnChain[i] != std::numeric_limits<LengthType>::max());
-			if (chainStart[i] == i) 
+			if (chainStart[i] == i)
 			{
 				helperLookup[i] = actualCalculables.size();
 				actualCalculables.push_back(i);
