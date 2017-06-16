@@ -182,6 +182,7 @@ private:
 			assert(nodeLookup.count(seedHits[i].nodeId) > 0);
 			result.emplace_back(nodeStart[nodeLookup.at(seedHits[i].nodeId)] + seedHits[i].nodePos, seedHits[i].sequencePosition);
 		}
+		std::sort(result.begin(), result.end(), [](auto& left, auto& right) { return left.second < right.second; });
 		return result;
 	}
 
@@ -634,21 +635,32 @@ private:
 		std::vector<const SeedhitEdge*> hitBacktrace;
 		std::vector<LengthType> hitDistance;
 		std::vector<std::vector<const SeedhitEdge*>> outEdges;
-		outEdges.resize(seedhitCount);
+		assert(startHit < seedhitCount + 2);
+		assert(endHit < seedhitCount + 2);
+		outEdges.resize(seedhitCount+2);
 		for (size_t i = 0; i < edges.size(); i++)
 		{
+			assert(edges[i].start < seedhitCount + 2);
+			assert(edges[i].end < seedhitCount + 2);
 			outEdges[edges[i].start].push_back(&(edges[i]));
 		}
-		hitBacktrace.resize(seedhitCount, nullptr);
-		hitDistance.resize(seedhitCount, std::numeric_limits<LengthType>::max());
+		hitBacktrace.resize(seedhitCount+2, nullptr);
+		hitDistance.resize(seedhitCount+2, std::numeric_limits<LengthType>::max());
 		hitBacktrace[startHit] = nullptr;
 		hitDistance[startHit] = 0;
 		bool foundOne = true;
+		for (size_t j = 0; j < outEdges[startHit].size(); j++)
+		{
+			assert(outEdges[startHit][j]->trace.size() < hitDistance[outEdges[startHit][j]->end]);
+			hitDistance[outEdges[startHit][j]->end] = hitDistance[startHit] + outEdges[startHit][j]->trace.size();
+			hitBacktrace[outEdges[startHit][j]->end] = outEdges[startHit][j];
+		}
 		while (foundOne)
 		{
 			foundOne = false;
 			for (size_t i = 0; i < seedhitCount; i++)
 			{
+				if (hitDistance[i] == std::numeric_limits<LengthType>::max()) continue;
 				for (size_t j = 0; j < outEdges[i].size(); i++)
 				{
 					if (hitDistance[i] + outEdges[i][j]->trace.size() < hitDistance[outEdges[i][j]->end])
@@ -660,12 +672,18 @@ private:
 				}
 			}
 		}
+		assert(hitBacktrace[endHit] != nullptr);
+		assert(hitDistance[endHit] != std::numeric_limits<LengthType>::max());
 		size_t currentHit = endHit;
-		MatrixPosition finalPosition = hitBacktrace[currentHit]->trace.back();
+		MatrixPosition finalPosition = std::make_pair(0, 0);
 		while (currentHit != startHit)
 		{
-			assert(hitDistance[currentHit] != std::numeric_limits<LengthType>::max());
 			assert(hitBacktrace[currentHit] != nullptr);
+			assert(hitDistance[currentHit] != std::numeric_limits<LengthType>::max());
+			if (finalPosition.first == 0 && finalPosition.second == 0 && hitBacktrace[currentHit]->trace.size() > 0)
+			{
+				finalPosition = hitBacktrace[currentHit]->trace.back();
+			}
 			for (size_t i = 0; i < hitBacktrace[currentHit]->trace.size()-1; i++)
 			{
 				if (hitBacktrace[currentHit]->trace[i] != hitBacktrace[currentHit]->trace[i+1])
@@ -679,6 +697,7 @@ private:
 			}
 			currentHit = hitBacktrace[currentHit]->start;
 		}
+		assert(finalPosition.first != 0 && finalPosition.second != 0);
 		return finalPosition;
 	}
 
@@ -998,7 +1017,7 @@ private:
 			if (reachableFromStart[endHit]) break;
 		}
 
-		auto finalPosition = makeBacktrace(resultBacktrace, seedhitEdges, startHit, endHit, seedHits.size() + 2);
+		auto finalPosition = makeBacktrace(resultBacktrace, seedhitEdges, startHit, endHit, seedHits.size());
 
 		// size_t startw = 5815;
 		// size_t startj = 2690;
