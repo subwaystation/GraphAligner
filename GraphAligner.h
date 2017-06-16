@@ -635,7 +635,7 @@ private:
 					{
 						auto u = nodeEnd[inNeighbors[nodeIndex][i]]-1;
 						plusOneDistanceQueueBackward.emplace_back(u, j, w, j, seedHit);
-						if (sequence[j-2] == nodeSequences[u])
+						if (sequence[j-1] == nodeSequences[w])
 						{
 							currentDistanceQueueBackward.emplace_back(u, j-1, w, j, seedHit);
 						}
@@ -649,7 +649,7 @@ private:
 				{
 					auto u = w-1;
 					plusOneDistanceQueueBackward.emplace_back(u, j, w, j, seedHit);
-					if (sequence[j-2] == nodeSequences[u])
+					if (sequence[j-1] == nodeSequences[w])
 					{
 						currentDistanceQueueBackward.emplace_back(u, j-1, w, j, seedHit);
 					}
