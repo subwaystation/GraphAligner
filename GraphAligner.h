@@ -526,7 +526,7 @@ private:
 				if (foundForward[seedHit]) continue;
 				if (visitedBySeedHitForward[seedHit].get(w, j)) continue;
 				visitedBySeedHitForward[seedHit].set(w, j);
-				visitedByAnyForward.set(w, j);
+				if (seedHits.size() > 1) visitedByAnyForward.set(w, j);
 				forwardBacktraces[seedHit].set(w, j, picked.backtrace);
 				visited.set(w, j);
 				if (j == sequence.size())
@@ -537,7 +537,7 @@ private:
 					propagateReachability(reachableFromStart, seedhitEdges);
 					continue;
 				}
-				if (visitedByAnyBackward.get(w, j))
+				if (seedHits.size() > 1 && visitedByAnyBackward.get(w, j))
 				{
 					for (size_t i = 0; i < seedHits.size(); i++)
 					{
@@ -598,7 +598,7 @@ private:
 				if (foundBackward[seedHit]) continue;
 				if (visitedBySeedHitBackward[seedHit].get(w, j)) continue;
 				visitedBySeedHitBackward[seedHit].set(w, j);
-				visitedByAnyBackward.set(w, j);
+				if (seedHits.size() > 1) visitedByAnyBackward.set(w, j);
 				backwardBacktraces[seedHit].set(w, j, picked.backtrace);
 				visited.set(w, j);
 				if (j <= 1)
@@ -609,7 +609,7 @@ private:
 					propagateReachability(reachableFromStart, seedhitEdges);
 					continue;
 				}
-				if (visitedByAnyForward.get(w, j))
+				if (seedHits.size() > 1 && visitedByAnyForward.get(w, j))
 				{
 					for (size_t i = 0; i < seedHits.size(); i++)
 					{
