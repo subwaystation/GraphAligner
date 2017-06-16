@@ -418,6 +418,8 @@ private:
 	{
 		std::vector<SparseBoolMatrix<SliceRow<LengthType>>> visitedBySeedHitForward;
 		std::vector<SparseBoolMatrix<SliceRow<LengthType>>> visitedBySeedHitBackward;
+		SparseBoolMatrix<SliceRow<LengthType>> visitedByAnyForward {nodeSequences.size() + 1, sequence.size()+1};
+		SparseBoolMatrix<SliceRow<LengthType>> visitedByAnyBackward {nodeSequences.size() + 1, sequence.size()+1};
 		visitedBySeedHitForward.resize(seedHits.size(), {nodeSequences.size() + 1, sequence.size()+1});
 		visitedBySeedHitBackward.resize(seedHits.size(), {nodeSequences.size() + 1, sequence.size()+1});
 		std::vector<SparseMatrix<MatrixPosition>> forwardBacktraces;
@@ -524,6 +526,7 @@ private:
 				if (foundForward[seedHit]) continue;
 				if (visitedBySeedHitForward[seedHit].get(w, j)) continue;
 				visitedBySeedHitForward[seedHit].set(w, j);
+				visitedByAnyForward.set(w, j);
 				forwardBacktraces[seedHit].set(w, j, picked.backtrace);
 				visited.set(w, j);
 				if (j == sequence.size())
@@ -534,19 +537,22 @@ private:
 					propagateReachability(reachableFromStart, seedhitEdges);
 					continue;
 				}
-				for (size_t i = 0; i < seedHits.size(); i++)
+				if (visitedByAnyBackward.get(w, j))
 				{
-					if (i == seedHit) continue;
-					if (visitedBySeedHitBackward[i].get(w, j))
+					for (size_t i = 0; i < seedHits.size(); i++)
 					{
-						foundForward[seedHit] = true;
-						auto bt1 = getBacktracePath(forwardBacktraces[seedHit], w, j, true);
-						assert(backwardBacktraces[i].exists(w, j));
-						auto bt2 = getBacktracePath(backwardBacktraces[i], w, j, false);
-						bt1.insert(bt1.end(), bt2.begin(), bt2.end());
-						seedhitEdges.emplace_back(bt1, seedHit, i);
-						propagateReachability(reachableFromStart, seedhitEdges);
-						continue;
+						if (i == seedHit) continue;
+						if (visitedBySeedHitBackward[i].get(w, j))
+						{
+							foundForward[seedHit] = true;
+							auto bt1 = getBacktracePath(forwardBacktraces[seedHit], w, j, true);
+							assert(backwardBacktraces[i].exists(w, j));
+							auto bt2 = getBacktracePath(backwardBacktraces[i], w, j, false);
+							bt1.insert(bt1.end(), bt2.begin(), bt2.end());
+							seedhitEdges.emplace_back(bt1, seedHit, i);
+							propagateReachability(reachableFromStart, seedhitEdges);
+							continue;
+						}
 					}
 				}
 				plusOneDistanceQueueForward.emplace_back(w, j+1, w, j, seedHit);
@@ -592,6 +598,7 @@ private:
 				if (foundBackward[seedHit]) continue;
 				if (visitedBySeedHitBackward[seedHit].get(w, j)) continue;
 				visitedBySeedHitBackward[seedHit].set(w, j);
+				visitedByAnyBackward.set(w, j);
 				backwardBacktraces[seedHit].set(w, j, picked.backtrace);
 				visited.set(w, j);
 				if (j <= 1)
@@ -602,19 +609,22 @@ private:
 					propagateReachability(reachableFromStart, seedhitEdges);
 					continue;
 				}
-				for (size_t i = 0; i < seedHits.size(); i++)
+				if (visitedByAnyForward.get(w, j))
 				{
-					if (i == seedHit) continue;
-					if (visitedBySeedHitForward[i].get(w, j))
+					for (size_t i = 0; i < seedHits.size(); i++)
 					{
-						foundBackward[seedHit] = true;
-						auto bt1 = getBacktracePath(backwardBacktraces[seedHit], w, j, false);
-						assert(forwardBacktraces[i].exists(w, j));
-						auto bt2 = getBacktracePath(forwardBacktraces[i], w, j, true);
-						bt2.insert(bt2.end(), bt1.begin(), bt1.end());
-						seedhitEdges.emplace_back(bt2, i, seedHit);
-						propagateReachability(reachableFromStart, seedhitEdges);
-						continue;
+						if (i == seedHit) continue;
+						if (visitedBySeedHitForward[i].get(w, j))
+						{
+							foundBackward[seedHit] = true;
+							auto bt1 = getBacktracePath(backwardBacktraces[seedHit], w, j, false);
+							assert(forwardBacktraces[i].exists(w, j));
+							auto bt2 = getBacktracePath(forwardBacktraces[i], w, j, true);
+							bt2.insert(bt2.end(), bt1.begin(), bt1.end());
+							seedhitEdges.emplace_back(bt2, i, seedHit);
+							propagateReachability(reachableFromStart, seedhitEdges);
+							continue;
+						}
 					}
 				}
 				plusOneDistanceQueueBackward.emplace_back(w, j-1, w, j, seedHit);
