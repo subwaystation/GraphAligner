@@ -156,11 +156,11 @@ public:
 		finalized = true;
 	}
 
-	AlignmentResult AlignOneWay(const std::string& seq_id, const std::string& sequence, int dynamicWidth, const std::vector<SeedHit>& seedHits, int dynamicStart) const
+	AlignmentResult AlignOneWay(const std::string& seq_id, const std::string& sequence, const std::vector<SeedHit>& seedHits) const
 	{
 		assert(finalized);
 		auto seedsInMatrix = getSeedHitPositionsInMatrix(sequence, seedHits);
-		auto trace = getBacktrace(sequence, dynamicWidth, dynamicStart, seedsInMatrix);
+		auto trace = getBacktrace(sequence, seedsInMatrix);
 		//failed alignment, don't output
 		if (std::get<0>(trace) == std::numeric_limits<ScoreType>::min()) return emptyAlignment();
 		auto result = traceToAlignment(seq_id, sequence, std::get<0>(trace), std::get<2>(trace), std::get<1>(trace));
@@ -598,119 +598,407 @@ private:
 		return result;
 	}
 
-	std::vector<std::tuple<MatrixPosition, MatrixPosition>> getExpandoFromSeed(const std::string& sequence, const std::vector<MatrixPosition>& seedHits, LengthType initialWidth) const
-	{
-		auto columns = getInitialBandLocations(sequence.size(), seedHits);
-		SparseBoolMatrix<SliceRow<LengthType>> band {nodeSequences.size() + 1, 1};
-		for (auto col : columns)
-		{
-			if (col == 0) continue;
-			expandBandDynamically(band, col, 0, initialWidth);
-		}
-		auto cols = getProcessableColumns(band, 0);
-		std::vector<std::tuple<MatrixPosition, MatrixPosition>> result;
-		for (auto pos : cols.second)
-		{
-			result.push_back(std::make_tuple(std::make_pair(pos, 1), std::make_pair(0, 0)));
-		}
-		return result;
-	}	
-
 	class ExpandoCell
 	{
 	public:
-		ExpandoCell(LengthType w, LengthType j, LengthType btw, LengthType btj) :
+		ExpandoCell(LengthType w, LengthType j, LengthType btw, LengthType btj, size_t seedHit) :
 		position(w, j),
-		backtrace(btw, btj)
+		backtrace(btw, btj),
+		seedHit(seedHit)
 		{}
-		ExpandoCell(MatrixPosition pos, MatrixPosition bt) :
+		ExpandoCell(MatrixPosition pos, MatrixPosition bt, size_t seedHit) :
 		position(pos),
-		backtrace(bt)
+		backtrace(bt),
+		seedHit(seedHit)
 		{}
 		MatrixPosition position;
 		MatrixPosition backtrace;
+		size_t seedHit;
 	};
 
-	template <typename MatrixType>
-	std::pair<LengthType, ScoreType> getScoreAndPositionWithExpandoThingy(const std::string& sequence, SparseMatrix<MatrixPosition>& backtrace, MatrixType& visited, LengthType maxRow, const std::vector<std::tuple<MatrixPosition, MatrixPosition>>& initial) const
+	class SeedhitEdge
 	{
-		if (maxRow > sequence.size()) maxRow = sequence.size();
-		// SparseMatrix<ScoreType> scores {nodeSequences.size() + 1, maxRow + 1};
-		std::vector<ExpandoCell> currentDistanceQueue;
-		std::vector<ExpandoCell> plusOneDistanceQueue;
-		// SparseMatrix<ScoreType> distances {nodeSequences.size() + 1, maxRow + 1};
-		for (auto init : initial)
+	public:
+		SeedhitEdge(const std::vector<MatrixPosition>& trace, size_t start, size_t end) :
+		trace(trace),
+		start(start),
+		end(end)
+		{}
+		std::vector<MatrixPosition> trace;
+		size_t start;
+		size_t end;
+	};
+
+	MatrixPosition makeBacktrace(SparseMatrix<MatrixPosition>& resultBacktrace, const std::vector<SeedhitEdge>& edges, size_t startHit, size_t endHit, size_t seedhitCount) const
+	{
+		std::vector<const SeedhitEdge*> hitBacktrace;
+		std::vector<LengthType> hitDistance;
+		std::vector<std::vector<const SeedhitEdge*>> outEdges;
+		outEdges.resize(seedhitCount);
+		for (size_t i = 0; i < edges.size(); i++)
 		{
-			auto w = std::get<0>(init).first;
-			backtrace.set(std::get<0>(init).first, std::get<0>(init).second, std::make_pair(std::get<1>(init).first, std::get<1>(init).second));
-			if (nodeSequences[w] == sequence[0])
+			outEdges[edges[i].start].push_back(&(edges[i]));
+		}
+		hitBacktrace.resize(seedhitCount, nullptr);
+		hitDistance.resize(seedhitCount, std::numeric_limits<LengthType>::max());
+		hitBacktrace[startHit] = nullptr;
+		hitDistance[startHit] = 0;
+		bool foundOne = true;
+		while (foundOne)
+		{
+			foundOne = false;
+			for (size_t i = 0; i < seedhitCount; i++)
 			{
-				currentDistanceQueue.emplace_back(std::get<0>(init), std::get<1>(init));
-			}
-			else
-			{
-				plusOneDistanceQueue.emplace_back(std::get<0>(init), std::get<1>(init));
+				for (size_t j = 0; j < outEdges[i].size(); i++)
+				{
+					if (hitDistance[i] + outEdges[i][j]->trace.size() < hitDistance[outEdges[i][j]->end])
+					{
+						hitDistance[outEdges[i][j]->end] = hitDistance[i] + outEdges[i][j]->trace.size();
+						hitBacktrace[outEdges[i][j]->end] = outEdges[i][j];
+						foundOne = true;
+					}
+				}
 			}
 		}
-		ScoreType currentDistance = 0;
-		LengthType finalPosition = 0;
-		size_t processed = 0;
+		size_t currentHit = endHit;
+		MatrixPosition finalPosition = hitBacktrace[currentHit]->trace.back();
+		while (currentHit != startHit)
+		{
+			assert(hitDistance[currentHit] != std::numeric_limits<LengthType>::max());
+			assert(hitBacktrace[currentHit] != nullptr);
+			for (size_t i = 0; i < hitBacktrace[currentHit]->trace.size()-1; i++)
+			{
+				if (hitBacktrace[currentHit]->trace[i] != hitBacktrace[currentHit]->trace[i+1])
+				{
+					resultBacktrace.set(hitBacktrace[currentHit]->trace[i+1].first, hitBacktrace[currentHit]->trace[i+1].second, hitBacktrace[currentHit]->trace[i]);
+				}
+			}
+			if (hitBacktrace[currentHit]->start == startHit)
+			{
+				resultBacktrace.set(hitBacktrace[currentHit]->trace[0].first, hitBacktrace[currentHit]->trace[0].second, {0, 0});
+			}
+			currentHit = hitBacktrace[currentHit]->start;
+		}
+		return finalPosition;
+	}
+
+	std::vector<MatrixPosition> getBacktracePath(const SparseMatrix<MatrixPosition>& trace, LengthType w, LengthType j, bool reverse) const
+	{
+		MatrixPosition pos = std::make_pair(w, j);
+		std::vector<MatrixPosition> result;
+		result.push_back(pos);
 		while (true)
 		{
-			if (currentDistanceQueue.size() == 0)
+			assert(trace.exists(pos.first, pos.second));
+			auto newPos = trace.get(pos.first, pos.second);
+			if (newPos == pos) break;
+			pos = newPos;
+			result.push_back(pos);
+		}
+		if (reverse) std::reverse(result.begin(), result.end());
+		return result;
+	}
+
+	void propagateReachability(std::vector<bool>& reachableFromStart, const std::vector<SeedhitEdge>& edges) const
+	{
+		bool foundOne = true;
+		while (foundOne)
+		{
+			foundOne = false;
+			for (size_t i = 0; i < edges.size(); i++)
 			{
-				std::swap(currentDistanceQueue, plusOneDistanceQueue);
-				plusOneDistanceQueue.clear();
-				currentDistance += 1;
-				assert(currentDistance < sequence.size());
+				if (reachableFromStart[edges[i].start] && !reachableFromStart[edges[i].end])
+				{
+					foundOne = true;
+					reachableFromStart[edges[i].end] = true;
+				}
 			}
-			auto picked = currentDistanceQueue.back();
-			currentDistanceQueue.pop_back();
-			processed++;
-			auto w = picked.position.first;
-			auto j = picked.position.second;
-			if (visited.get(w, j)) continue;
-			// scores.set(w, j, currentDistance);
-			backtrace.set(w, j, picked.backtrace);
-			// distances.set(w, j, currentDistance);
+		}
+	}
+
+	template <typename MatrixType>
+	std::pair<LengthType, ScoreType> getScoreAndPositionWithExpandoThingy(const std::string& sequence, SparseMatrix<MatrixPosition>& resultBacktrace, MatrixType& visited, const std::vector<MatrixPosition>& seedHits) const
+	{
+		// auto starts = getInitialBandLocations(sequence.size(), seedHits);
+		// SparseMatrix<ScoreType> scores {nodeSequences.size() + 1, maxRow + 1};
+		SparseMatrix<std::vector<size_t>> visitedBySeedHitForward {nodeSequences.size() + 1, sequence.size() + 1};
+		SparseMatrix<std::vector<size_t>> visitedBySeedHitBackward {nodeSequences.size() + 1, sequence.size() + 1};
+		std::vector<SparseMatrix<MatrixPosition>> forwardBacktraces;
+		forwardBacktraces.resize(seedHits.size(), {nodeSequences.size() + 1, sequence.size()+1});
+		std::vector<SparseMatrix<MatrixPosition>> backwardBacktraces;
+		backwardBacktraces.resize(seedHits.size(), {nodeSequences.size() + 1, sequence.size()+1});
+		std::vector<SeedhitEdge> seedhitEdges;
+		std::vector<bool> foundForward;
+		std::vector<bool> foundBackward;
+		foundForward.resize(seedHits.size(), false);
+		foundBackward.resize(seedHits.size(), false);
+		auto startHit = seedHits.size();
+		auto endHit = seedHits.size()+1;
+		std::vector<bool> reachableFromStart;
+		reachableFromStart.resize(seedHits.size()+2, false);
+		reachableFromStart[startHit] = true;
+		std::vector<ExpandoCell> currentDistanceQueueForward;
+		std::vector<ExpandoCell> plusOneDistanceQueueForward;
+		std::vector<ExpandoCell> currentDistanceQueueBackward;
+		std::vector<ExpandoCell> plusOneDistanceQueueBackward;
+		// SparseMatrix<ScoreType> distances {nodeSequences.size() + 1, maxRow + 1};
+		// for (size_t i = 0; i < starts.size(); i++)
+		// {
+		// 	auto w = starts[i];
+		// 	forwardBacktraces[0].set(w, 0, {w, 0});
+		// 	visitedBySeedHitForward.set(w, 0, std::vector<size_t>{});
+		// 	currentDistanceQueueForward.emplace_back(w, 0, w, 0, 0);
+		// }
+		for (size_t seedI = 0; seedI < seedHits.size(); seedI++)
+		{
+			auto w = seedHits[seedI].first;
+			auto j = seedHits[seedI].second;
 			visited.set(w, j);
-			if (j == maxRow)
+			forwardBacktraces[seedI].set(w, j, {w, j});
+			backwardBacktraces[seedI].set(w, j, {w, j});
+			if (!visitedBySeedHitForward.exists(w, j))
 			{
-				finalPosition = w;
-				break;
+				visitedBySeedHitForward.set(w, j, std::vector<size_t>{});
 			}
-			plusOneDistanceQueue.emplace_back(w, j+1, w, j);
+			if (!visitedBySeedHitBackward.exists(w, j))
+			{
+				visitedBySeedHitBackward.set(w, j, std::vector<size_t>{});
+			}
+			visitedBySeedHitForward.get(w, j).push_back(seedI);
+			visitedBySeedHitBackward.get(w, j).push_back(seedI);
 			auto nodeIndex = indexToNode[w];
+			plusOneDistanceQueueForward.emplace_back(w, j+1, w, j, seedI);
 			if (w == nodeEnd[nodeIndex]-1)
 			{
 				for (size_t i = 0; i < outNeighbors[nodeIndex].size(); i++)
 				{
 					auto u = nodeStart[outNeighbors[nodeIndex][i]];
-					plusOneDistanceQueue.emplace_back(u, j, w, j);
-					if (sequence[j] == nodeSequences[u])
+					plusOneDistanceQueueForward.emplace_back(u, j, w, j, seedI);
+					if (nodeSequences[u] == sequence[j])
 					{
-						currentDistanceQueue.emplace_back(u, j+1, w, j);
+						currentDistanceQueueForward.emplace_back(u, j+1, w, j, seedI);
 					}
 					else
 					{
-						plusOneDistanceQueue.emplace_back(u, j+1, w, j);
+						plusOneDistanceQueueForward.emplace_back(u, j+1, w, j, seedI);
 					}
 				}
 			}
 			else
 			{
 				auto u = w+1;
-				plusOneDistanceQueue.emplace_back(u, j, w, j);
-				if (sequence[j] == nodeSequences[u])
+				plusOneDistanceQueueForward.emplace_back(u, j, w, j, seedI);
+				if (nodeSequences[u] == sequence[j])
 				{
-					currentDistanceQueue.emplace_back(u, j+1, w, j);
+					currentDistanceQueueForward.emplace_back(u, j+1, w, j, seedI);
 				}
 				else
 				{
-					plusOneDistanceQueue.emplace_back(u, j+1, w, j);
+					plusOneDistanceQueueForward.emplace_back(u, j+1, w, j, seedI);
+				}
+			}
+			plusOneDistanceQueueBackward.emplace_back(w, j-1, w, j, seedI);
+			if (w == nodeStart[nodeIndex])
+			{
+				for (size_t i = 0; i < inNeighbors[nodeIndex].size(); i++)
+				{
+					auto u = nodeEnd[inNeighbors[nodeIndex][i]]-1;
+					plusOneDistanceQueueBackward.emplace_back(u, j, w, j, seedI);
+					if (nodeSequences[u] == sequence[j])
+					{
+						currentDistanceQueueBackward.emplace_back(u, j-1, w, j, seedI);
+					}
+					else
+					{
+						plusOneDistanceQueueBackward.emplace_back(u, j-1, w, j, seedI);
+					}
+				}
+			}
+			else
+			{
+				auto u = w - 1;
+				plusOneDistanceQueueBackward.emplace_back(u, j, w, j, seedI);
+				if (nodeSequences[u] == sequence[j])
+				{
+					currentDistanceQueueBackward.emplace_back(u, j-1, w, j, seedI);
+				}
+				else
+				{
+					plusOneDistanceQueueBackward.emplace_back(u, j-1, w, j, seedI);
 				}
 			}
 		}
+		ScoreType currentDistance = 0;
+		size_t processed = 0;
+		while (true)
+		{
+			if (currentDistanceQueueForward.size() > 0)
+			{
+				auto picked = currentDistanceQueueForward.back();
+				currentDistanceQueueForward.pop_back();
+				processed++;
+				auto w = picked.position.first;
+				auto j = picked.position.second;
+				auto seedHit = picked.seedHit;
+				if (foundForward[seedHit]) continue;
+				if (!visitedBySeedHitForward.exists(w, j))
+				{
+					visitedBySeedHitForward.set(w, j, std::vector<size_t>{});
+				}
+				auto& forwardVisited = visitedBySeedHitForward.getref(w, j);
+				if (std::find(forwardVisited.begin(), forwardVisited.end(), seedHit) != forwardVisited.end())
+				{
+					continue;
+				}
+				forwardVisited.emplace_back(seedHit);
+				forwardBacktraces[seedHit].set(w, j, picked.backtrace);
+				visited.set(w, j);
+				if (j == sequence.size())
+				{
+					foundForward[seedHit] = true;
+					auto bt = getBacktracePath(forwardBacktraces[seedHit], w, j, true);
+					seedhitEdges.emplace_back(bt, seedHit, endHit);
+					propagateReachability(reachableFromStart, seedhitEdges);
+					continue;
+				}
+				if (!visitedBySeedHitBackward.exists(w, j))
+				{
+					visitedBySeedHitBackward.set(w, j, std::vector<size_t>{});
+				}
+				auto backwardVisited = visitedBySeedHitBackward.getref(w, j);
+				if (backwardVisited.size() > 0)
+				{
+					foundForward[seedHit] = true;
+					auto bt1 = getBacktracePath(forwardBacktraces[seedHit], w, j, true);
+					assert(backwardBacktraces[backwardVisited[0]].exists(w, j));
+					auto bt2 = getBacktracePath(backwardBacktraces[backwardVisited[0]], w, j, false);
+					bt1.insert(bt1.end(), bt2.begin(), bt2.end());
+					seedhitEdges.emplace_back(bt1, seedHit, backwardVisited[0]);
+					propagateReachability(reachableFromStart, seedhitEdges);
+					continue;
+				}
+				plusOneDistanceQueueForward.emplace_back(w, j+1, w, j, seedHit);
+				auto nodeIndex = indexToNode[w];
+				if (w == nodeEnd[nodeIndex]-1)
+				{
+					for (size_t i = 0; i < outNeighbors[nodeIndex].size(); i++)
+					{
+						auto u = nodeStart[outNeighbors[nodeIndex][i]];
+						plusOneDistanceQueueForward.emplace_back(u, j, w, j, seedHit);
+						if (sequence[j] == nodeSequences[u])
+						{
+							currentDistanceQueueForward.emplace_back(u, j+1, w, j, seedHit);
+						}
+						else
+						{
+							plusOneDistanceQueueForward.emplace_back(u, j+1, w, j, seedHit);
+						}
+					}
+				}
+				else
+				{
+					auto u = w+1;
+					plusOneDistanceQueueForward.emplace_back(u, j, w, j, seedHit);
+					if (sequence[j] == nodeSequences[u])
+					{
+						currentDistanceQueueForward.emplace_back(u, j+1, w, j, seedHit);
+					}
+					else
+					{
+						plusOneDistanceQueueForward.emplace_back(u, j+1, w, j, seedHit);
+					}
+				}
+			}
+			else if (currentDistanceQueueBackward.size() > 0)
+			{
+				auto picked = currentDistanceQueueBackward.back();
+				currentDistanceQueueBackward.pop_back();
+				processed++;
+				auto w = picked.position.first;
+				auto j = picked.position.second;
+				auto seedHit = picked.seedHit;
+				if (foundBackward[seedHit]) continue;
+				if (!visitedBySeedHitBackward.exists(w, j))
+				{
+					visitedBySeedHitBackward.set(w, j, std::vector<size_t>{});
+				}
+				auto& backwardVisited = visitedBySeedHitBackward.getref(w, j);
+				if (std::find(backwardVisited.begin(), backwardVisited.end(), seedHit) != backwardVisited.end())
+				{
+					continue;
+				}
+				backwardVisited.emplace_back(seedHit);
+				backwardBacktraces[seedHit].set(w, j, picked.backtrace);
+				visited.set(w, j);
+				if (j <= 1)
+				{
+					foundBackward[seedHit] = true;
+					auto bt = getBacktracePath(backwardBacktraces[seedHit], w, j, false);
+					seedhitEdges.emplace_back(bt, startHit, seedHit);
+					propagateReachability(reachableFromStart, seedhitEdges);
+					continue;
+				}
+				if (!visitedBySeedHitForward.exists(w, j))
+				{
+					visitedBySeedHitForward.set(w, j, std::vector<size_t>{});
+				}
+				auto forwardVisited = visitedBySeedHitForward.get(w, j);
+				if (forwardVisited.size() > 0)
+				{
+					foundBackward[seedHit] = true;
+					auto bt1 = getBacktracePath(backwardBacktraces[seedHit], w, j, false);
+					assert(forwardBacktraces[forwardVisited[0]].exists(w, j));
+					auto bt2 = getBacktracePath(forwardBacktraces[forwardVisited[0]], w, j, true);
+					bt2.insert(bt2.end(), bt1.begin(), bt1.end());
+					seedhitEdges.emplace_back(bt2, forwardVisited[0], seedHit);
+					propagateReachability(reachableFromStart, seedhitEdges);
+					continue;
+				}
+				plusOneDistanceQueueBackward.emplace_back(w, j-1, w, j, seedHit);
+				auto nodeIndex = indexToNode[w];
+				if (w == nodeStart[nodeIndex])
+				{
+					for (size_t i = 0; i < inNeighbors[nodeIndex].size(); i++)
+					{
+						auto u = nodeEnd[inNeighbors[nodeIndex][i]]-1;
+						plusOneDistanceQueueBackward.emplace_back(u, j, w, j, seedHit);
+						if (sequence[j-2] == nodeSequences[u])
+						{
+							currentDistanceQueueBackward.emplace_back(u, j-1, w, j, seedHit);
+						}
+						else
+						{
+							plusOneDistanceQueueBackward.emplace_back(u, j-1, w, j, seedHit);
+						}
+					}
+				}
+				else
+				{
+					auto u = w-1;
+					plusOneDistanceQueueBackward.emplace_back(u, j, w, j, seedHit);
+					if (sequence[j-2] == nodeSequences[u])
+					{
+						currentDistanceQueueBackward.emplace_back(u, j-1, w, j, seedHit);
+					}
+					else
+					{
+						plusOneDistanceQueueBackward.emplace_back(u, j-1, w, j, seedHit);
+					}
+				}
+			}
+			else
+			{
+				std::swap(currentDistanceQueueForward, plusOneDistanceQueueForward);
+				plusOneDistanceQueueForward.clear();
+				std::swap(currentDistanceQueueBackward, plusOneDistanceQueueBackward);
+				plusOneDistanceQueueBackward.clear();
+				currentDistance += 1;
+				assert(currentDistance < sequence.size());
+			}
+			if (reachableFromStart[endHit]) break;
+		}
+
+		auto finalPosition = makeBacktrace(resultBacktrace, seedhitEdges, startHit, endHit, seedHits.size() + 2);
 
 		// size_t startw = 5815;
 		// size_t startj = 2690;
@@ -762,8 +1050,8 @@ private:
 		// 	scoreW = nextPos.first;
 		// 	scoreJ = nextPos.second;
 		// }
-		assert(currentDistance < maxRow);
-		return std::make_pair(finalPosition, currentDistance);
+		assert(currentDistance < sequence.size());
+		return std::make_pair(finalPosition.first, currentDistance);
 	}
 
 	template<bool distanceMatrixOrder, typename MatrixType>
@@ -968,16 +1256,15 @@ private:
 		return result;
 	}
 
-	std::tuple<ScoreType, int, std::vector<MatrixPosition>> getBacktrace(const std::string& sequence, int dynamicWidth, int dynamicStartRow, const std::vector<MatrixPosition>& seedHits) const
+	std::tuple<ScoreType, int, std::vector<MatrixPosition>> getBacktrace(const std::string& sequence, const std::vector<MatrixPosition>& seedHits) const
 	{
 		// auto distanceMatrix = getDistanceMatrixBoostJohnson();
 		SparseMatrix<MatrixPosition> backtraceMatrix {nodeSequences.size(), sequence.size() + 1};
 		SparseBoolMatrix<SliceRow<LengthType>> band {nodeSequences.size() + 1, sequence.size() + 1};
 		// auto foundHeuristic = getScoreAndPositionWithHeuristicExpandoThingy(sequence, backtraceMatrix, band);
 		// auto result = backtraceExpandoThingy(foundHeuristic, backtraceMatrix, band, sequence);
-		auto init = getExpandoFromSeed(sequence, seedHits, dynamicWidth);
-		auto dynamicStart = getScoreAndPositionWithExpandoThingy(sequence, backtraceMatrix, band, dynamicStartRow, init);
-		auto result = backtraceExpandoThingy(std::get<0>(dynamicStart), backtraceMatrix, band, sequence);
+		auto expandoResult = getScoreAndPositionWithExpandoThingy(sequence, backtraceMatrix, band, seedHits);
+		auto result = backtraceExpandoThingy(std::get<0>(expandoResult), backtraceMatrix, band, sequence);
 		auto expandoCells = band.totalOnes();
 		std::cerr << "number of expando cells: " << expandoCells << std::endl;
 		// auto slice = getScoreAndBacktraceMatrix(sequence, distanceMatrix, band, backtraceMatrix);

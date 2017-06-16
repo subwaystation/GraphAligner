@@ -13,11 +13,9 @@ int main(int argc, char** argv)
 	std::string alignmentFile = "";
 	std::string auggraphFile = "";
 	int numThreads = 0;
-	int dynamicWidth = 0;
-	int dynamicStart = 0;
 	int c;
 
-	while ((c = getopt(argc, argv, "g:f:s:a:t:B:A:b:")) != -1)
+	while ((c = getopt(argc, argv, "g:f:s:a:t:A:")) != -1)
 	{
 		switch(c)
 		{
@@ -36,12 +34,6 @@ int main(int argc, char** argv)
 			case 't':
 				numThreads = std::stoi(optarg);
 				break;
-			case 'B':
-				dynamicWidth = std::stoi(optarg);
-				break;
-			case 'b':
-				dynamicStart = std::stoi(optarg);
-				break;
 			case 'A':
 				auggraphFile = std::string(optarg);
 				break;
@@ -54,13 +46,7 @@ int main(int argc, char** argv)
 		std::exit(0);
 	}
 
-	if (dynamicWidth < 2)
-	{
-		std::cerr << "dynamic bandwidth must be >= 2" << std::endl;
-		std::exit(0);
-	}
-
-	alignReads(graphFile, fastqFile, seedFile, numThreads, dynamicWidth, alignmentFile, auggraphFile, dynamicStart);
+	alignReads(graphFile, fastqFile, seedFile, numThreads, alignmentFile, auggraphFile);
 
 	return 0;
 }

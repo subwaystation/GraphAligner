@@ -26,6 +26,10 @@ public:
 	{
 		return rows[row].at(column);
 	}
+	T& getref(size_t column, size_t row)
+	{
+		return rows[row].at(column);
+	}
 	bool exists(size_t column, size_t row) const
 	{
 		return rows[row].count(column) > 0;
