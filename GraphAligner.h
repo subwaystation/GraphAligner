@@ -416,8 +416,10 @@ private:
 	template <typename MatrixType>
 	std::pair<LengthType, ScoreType> getScoreAndPositionWithExpandoThingy(const std::string& sequence, SparseMatrix<MatrixPosition>& resultBacktrace, MatrixType& visited, const std::vector<MatrixPosition>& seedHits) const
 	{
-		SparseMatrix<std::vector<size_t>> visitedBySeedHitForward {nodeSequences.size() + 1, sequence.size() + 1};
-		SparseMatrix<std::vector<size_t>> visitedBySeedHitBackward {nodeSequences.size() + 1, sequence.size() + 1};
+		std::vector<SparseBoolMatrix<SliceRow<LengthType>>> visitedBySeedHitForward;
+		std::vector<SparseBoolMatrix<SliceRow<LengthType>>> visitedBySeedHitBackward;
+		visitedBySeedHitForward.resize(seedHits.size(), {nodeSequences.size() + 1, sequence.size()+1});
+		visitedBySeedHitBackward.resize(seedHits.size(), {nodeSequences.size() + 1, sequence.size()+1});
 		std::vector<SparseMatrix<MatrixPosition>> forwardBacktraces;
 		forwardBacktraces.resize(seedHits.size(), {nodeSequences.size() + 1, sequence.size()+1});
 		std::vector<SparseMatrix<MatrixPosition>> backwardBacktraces;
@@ -443,16 +445,8 @@ private:
 			visited.set(w, j);
 			forwardBacktraces[seedI].set(w, j, {w, j});
 			backwardBacktraces[seedI].set(w, j, {w, j});
-			if (!visitedBySeedHitForward.exists(w, j))
-			{
-				visitedBySeedHitForward.set(w, j, std::vector<size_t>{});
-			}
-			if (!visitedBySeedHitBackward.exists(w, j))
-			{
-				visitedBySeedHitBackward.set(w, j, std::vector<size_t>{});
-			}
-			visitedBySeedHitForward.get(w, j).push_back(seedI);
-			visitedBySeedHitBackward.get(w, j).push_back(seedI);
+			visitedBySeedHitForward[seedI].set(w, j);
+			visitedBySeedHitBackward[seedI].set(w, j);
 			auto nodeIndex = indexToNode[w];
 			plusOneDistanceQueueForward.emplace_back(w, j+1, w, j, seedI);
 			if (w == nodeEnd[nodeIndex]-1)
@@ -528,16 +522,8 @@ private:
 				auto j = picked.position.second;
 				auto seedHit = picked.seedHit;
 				if (foundForward[seedHit]) continue;
-				if (!visitedBySeedHitForward.exists(w, j))
-				{
-					visitedBySeedHitForward.set(w, j, std::vector<size_t>{});
-				}
-				auto& forwardVisited = visitedBySeedHitForward.getref(w, j);
-				if (std::find(forwardVisited.begin(), forwardVisited.end(), seedHit) != forwardVisited.end())
-				{
-					continue;
-				}
-				forwardVisited.emplace_back(seedHit);
+				if (visitedBySeedHitForward[seedHit].get(w, j)) continue;
+				visitedBySeedHitForward[seedHit].set(w, j);
 				forwardBacktraces[seedHit].set(w, j, picked.backtrace);
 				visited.set(w, j);
 				if (j == sequence.size())
@@ -548,21 +534,20 @@ private:
 					propagateReachability(reachableFromStart, seedhitEdges);
 					continue;
 				}
-				if (!visitedBySeedHitBackward.exists(w, j))
+				for (size_t i = 0; i < seedHits.size(); i++)
 				{
-					visitedBySeedHitBackward.set(w, j, std::vector<size_t>{});
-				}
-				auto backwardVisited = visitedBySeedHitBackward.getref(w, j);
-				if (backwardVisited.size() > 0)
-				{
-					foundForward[seedHit] = true;
-					auto bt1 = getBacktracePath(forwardBacktraces[seedHit], w, j, true);
-					assert(backwardBacktraces[backwardVisited[0]].exists(w, j));
-					auto bt2 = getBacktracePath(backwardBacktraces[backwardVisited[0]], w, j, false);
-					bt1.insert(bt1.end(), bt2.begin(), bt2.end());
-					seedhitEdges.emplace_back(bt1, seedHit, backwardVisited[0]);
-					propagateReachability(reachableFromStart, seedhitEdges);
-					continue;
+					if (i == seedHit) continue;
+					if (visitedBySeedHitBackward[i].get(w, j))
+					{
+						foundForward[seedHit] = true;
+						auto bt1 = getBacktracePath(forwardBacktraces[seedHit], w, j, true);
+						assert(backwardBacktraces[i].exists(w, j));
+						auto bt2 = getBacktracePath(backwardBacktraces[i], w, j, false);
+						bt1.insert(bt1.end(), bt2.begin(), bt2.end());
+						seedhitEdges.emplace_back(bt1, seedHit, i);
+						propagateReachability(reachableFromStart, seedhitEdges);
+						continue;
+					}
 				}
 				plusOneDistanceQueueForward.emplace_back(w, j+1, w, j, seedHit);
 				auto nodeIndex = indexToNode[w];
@@ -605,16 +590,8 @@ private:
 				auto j = picked.position.second;
 				auto seedHit = picked.seedHit;
 				if (foundBackward[seedHit]) continue;
-				if (!visitedBySeedHitBackward.exists(w, j))
-				{
-					visitedBySeedHitBackward.set(w, j, std::vector<size_t>{});
-				}
-				auto& backwardVisited = visitedBySeedHitBackward.getref(w, j);
-				if (std::find(backwardVisited.begin(), backwardVisited.end(), seedHit) != backwardVisited.end())
-				{
-					continue;
-				}
-				backwardVisited.emplace_back(seedHit);
+				if (visitedBySeedHitBackward[seedHit].get(w, j)) continue;
+				visitedBySeedHitBackward[seedHit].set(w, j);
 				backwardBacktraces[seedHit].set(w, j, picked.backtrace);
 				visited.set(w, j);
 				if (j <= 1)
@@ -625,21 +602,20 @@ private:
 					propagateReachability(reachableFromStart, seedhitEdges);
 					continue;
 				}
-				if (!visitedBySeedHitForward.exists(w, j))
+				for (size_t i = 0; i < seedHits.size(); i++)
 				{
-					visitedBySeedHitForward.set(w, j, std::vector<size_t>{});
-				}
-				auto forwardVisited = visitedBySeedHitForward.get(w, j);
-				if (forwardVisited.size() > 0)
-				{
-					foundBackward[seedHit] = true;
-					auto bt1 = getBacktracePath(backwardBacktraces[seedHit], w, j, false);
-					assert(forwardBacktraces[forwardVisited[0]].exists(w, j));
-					auto bt2 = getBacktracePath(forwardBacktraces[forwardVisited[0]], w, j, true);
-					bt2.insert(bt2.end(), bt1.begin(), bt1.end());
-					seedhitEdges.emplace_back(bt2, forwardVisited[0], seedHit);
-					propagateReachability(reachableFromStart, seedhitEdges);
-					continue;
+					if (i == seedHit) continue;
+					if (visitedBySeedHitForward[i].get(w, j))
+					{
+						foundBackward[seedHit] = true;
+						auto bt1 = getBacktracePath(backwardBacktraces[seedHit], w, j, false);
+						assert(forwardBacktraces[i].exists(w, j));
+						auto bt2 = getBacktracePath(forwardBacktraces[i], w, j, true);
+						bt2.insert(bt2.end(), bt1.begin(), bt1.end());
+						seedhitEdges.emplace_back(bt2, i, seedHit);
+						propagateReachability(reachableFromStart, seedhitEdges);
+						continue;
+					}
 				}
 				plusOneDistanceQueueBackward.emplace_back(w, j-1, w, j, seedHit);
 				auto nodeIndex = indexToNode[w];
