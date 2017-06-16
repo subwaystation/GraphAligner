@@ -635,12 +635,10 @@ private:
 	std::pair<LengthType, ScoreType> getScoreAndPositionWithExpandoThingy(const std::string& sequence, SparseMatrix<MatrixPosition>& backtrace, MatrixType& visited, LengthType maxRow, const std::vector<std::tuple<MatrixPosition, MatrixPosition>>& initial) const
 	{
 		if (maxRow > sequence.size()) maxRow = sequence.size();
-		SparseMatrix<ScoreType> scores {nodeSequences.size() + 1, maxRow + 1};
-		MatrixType optimalBacktraceSet {nodeSequences.size() + 1, maxRow + 1};
+		// SparseMatrix<ScoreType> scores {nodeSequences.size() + 1, maxRow + 1};
 		std::vector<ExpandoCell> currentDistanceQueue;
 		std::vector<ExpandoCell> plusOneDistanceQueue;
-		std::vector<ExpandoCell> plusTwoDistanceQueue;
-		SparseMatrix<ScoreType> distances {nodeSequences.size() + 1, maxRow + 1};
+		// SparseMatrix<ScoreType> distances {nodeSequences.size() + 1, maxRow + 1};
 		for (auto init : initial)
 		{
 			auto w = std::get<0>(init).first;
@@ -653,7 +651,6 @@ private:
 			{
 				plusOneDistanceQueue.emplace_back(std::get<0>(init), std::get<1>(init));
 			}
-			optimalBacktraceSet.set(w, 1);
 		}
 		ScoreType currentDistance = 0;
 		LengthType finalPosition = 0;
@@ -662,9 +659,8 @@ private:
 		{
 			if (currentDistanceQueue.size() == 0)
 			{
-				currentDistanceQueue = std::move(plusOneDistanceQueue);
-				plusOneDistanceQueue = std::move(plusTwoDistanceQueue);
-				plusTwoDistanceQueue.clear();
+				std::swap(currentDistanceQueue, plusOneDistanceQueue);
+				plusOneDistanceQueue.clear();
 				currentDistance += 1;
 				assert(currentDistance < sequence.size());
 			}
@@ -674,69 +670,44 @@ private:
 			auto w = picked.position.first;
 			auto j = picked.position.second;
 			if (visited.get(w, j)) continue;
-			scores.set(w, j, currentDistance);
+			// scores.set(w, j, currentDistance);
 			backtrace.set(w, j, picked.backtrace);
-			distances.set(w, j, currentDistance);
-			optimalBacktraceSet.set(w, j);
+			// distances.set(w, j, currentDistance);
 			visited.set(w, j);
 			if (j == maxRow)
 			{
 				finalPosition = w;
 				break;
 			}
-			if (!optimalBacktraceSet.get(w, j+1))
-			{
-				plusOneDistanceQueue.emplace_back(w, j+1, w, j);
-				backtrace.set(w, j+1, std::make_pair(w, j));
-			}
+			plusOneDistanceQueue.emplace_back(w, j+1, w, j);
 			auto nodeIndex = indexToNode[w];
 			if (w == nodeEnd[nodeIndex]-1)
 			{
 				for (size_t i = 0; i < outNeighbors[nodeIndex].size(); i++)
 				{
 					auto u = nodeStart[outNeighbors[nodeIndex][i]];
-					if (!optimalBacktraceSet.get(u, j))
-					{
-						plusOneDistanceQueue.emplace_back(u, j, w, j);
-					}
+					plusOneDistanceQueue.emplace_back(u, j, w, j);
 					if (sequence[j] == nodeSequences[u])
 					{
-						if (!optimalBacktraceSet.get(u, j+1))
-						{
-							currentDistanceQueue.emplace_back(u, j+1, w, j);
-							optimalBacktraceSet.set(u, j+1);
-						}
+						currentDistanceQueue.emplace_back(u, j+1, w, j);
 					}
 					else
 					{
-						if (!optimalBacktraceSet.get(u, j+1))
-						{
-							plusOneDistanceQueue.emplace_back(u, j+1, w, j);
-						}
+						plusOneDistanceQueue.emplace_back(u, j+1, w, j);
 					}
 				}
 			}
 			else
 			{
 				auto u = w+1;
-				if (!optimalBacktraceSet.get(u, j))
-				{
-					plusOneDistanceQueue.emplace_back(u, j, w, j);
-				}
+				plusOneDistanceQueue.emplace_back(u, j, w, j);
 				if (sequence[j] == nodeSequences[u])
 				{
-					if (!optimalBacktraceSet.get(u, j+1))
-					{
-						currentDistanceQueue.emplace_back(u, j+1, w, j);
-						optimalBacktraceSet.set(u, j+1);
-					}
+					currentDistanceQueue.emplace_back(u, j+1, w, j);
 				}
 				else
 				{
-					if (!optimalBacktraceSet.get(u, j+1))
-					{
-						plusOneDistanceQueue.emplace_back(u, j+1, w, j);
-					}
+					plusOneDistanceQueue.emplace_back(u, j+1, w, j);
 				}
 			}
 		}
@@ -770,29 +741,29 @@ private:
 		// 	std::cerr << std::endl;
 		// }
 
-		LengthType scoreW = finalPosition;
-		LengthType scoreJ = maxRow;
-		ScoreType score = 0;
-		while (scoreJ > 0)
-		{
-			auto nextPos = backtrace.get(scoreW, scoreJ);
-			if (nextPos.first == scoreW || nextPos.second == scoreJ)
-			{
-				score--;
-			}
-			else if (sequence[scoreJ-1] == nodeSequences[scoreW])
-			{
-				score++;
-			}
-			else
-			{
-				score--;
-			}
-			scoreW = nextPos.first;
-			scoreJ = nextPos.second;
-		}
+		// LengthType scoreW = finalPosition;
+		// LengthType scoreJ = maxRow;
+		// ScoreType score = 0;
+		// while (scoreJ > 0)
+		// {
+		// 	auto nextPos = backtrace.get(scoreW, scoreJ);
+		// 	if (nextPos.first == scoreW || nextPos.second == scoreJ)
+		// 	{
+		// 		score--;
+		// 	}
+		// 	else if (sequence[scoreJ-1] == nodeSequences[scoreW])
+		// 	{
+		// 		score++;
+		// 	}
+		// 	else
+		// 	{
+		// 		score--;
+		// 	}
+		// 	scoreW = nextPos.first;
+		// 	scoreJ = nextPos.second;
+		// }
 		assert(currentDistance < maxRow);
-		return std::make_pair(finalPosition, score);
+		return std::make_pair(finalPosition, currentDistance);
 	}
 
 	template<bool distanceMatrixOrder, typename MatrixType>
