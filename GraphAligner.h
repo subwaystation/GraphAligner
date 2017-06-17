@@ -339,7 +339,7 @@ private:
 			for (size_t i = 0; i < seedhitCount; i++)
 			{
 				if (hitDistance[i] == std::numeric_limits<LengthType>::max()) continue;
-				for (size_t j = 0; j < outEdges[i].size(); i++)
+				for (size_t j = 0; j < outEdges[i].size(); j++)
 				{
 					if (hitDistance[i] + outEdges[i][j]->trace.size() < hitDistance[outEdges[i][j]->end])
 					{
