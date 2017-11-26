@@ -138,157 +138,22 @@ std::vector<std::pair<size_t, bool>> getComponent(const GroupingBluntify& graph,
 	return result;
 }
 
-bool isClique(int leftSize, int rightSize, uint32_t assignments, int connections)
-{
-	int assigned[16];
-	for (int i = 0; i < 16; i++)
-	{
-		assigned[i] = (assignments >> (i * 2)) & 0x3;
-	}
-	for (int clique = 0; clique < 4; clique++)
-	{
-		SizeArray<int, 4> L;
-		SizeArray<int, 4> R;
-		for (int edge = 0; edge < 16; edge++)
-		{
-			if (!(connections & (1 << edge))) continue;
-			if (assigned[edge] != clique) continue;
-			int i = edge / 4;
-			int j = edge % 4;
-			if (i < leftSize) L.push_unique(i);
-			if (j < rightSize) R.push_unique(j);
-		}
-		for (int i = 0; i < L.size(); i++)
-		{
-			for (int j = 0; j < R.size(); j++)
-			{
-				if (!(connections & (1 << (4 * L[i] + R[j])))) return false;
-			}
-		}
-	}
-	return true;
-}
-
-//https://graphics.stanford.edu/~seander/bithacks.html#CountBitsSet64
-//at most 16 set bits
-int popcount(int v)
-{
-	assert(v <= 65536);
-	uint64_t c =  ((v & 0xfff) * 0x1001001001001ULL & 0x84210842108421ULL) % 0x1f;
-	c += (((v & 0xfff000) >> 12) * 0x1001001001001ULL & 0x84210842108421ULL) % 0x1f;
-	return c;
-}
-
-uint32_t getLexicographicallyFirstWithNumber(int numCliques)
-{
-	assert(numCliques == 2 || numCliques == 3);
-	if (numCliques == 2) return 1;
-	return 4 + 2;
-}
-
-uint32_t nextSolution(int leftSize, int rightSize, uint32_t previous, int numCliques)
-{
-	assert(numCliques == 2 || numCliques == 3);
-	previous++;
-	for (int i = 0; i < 16; i++)
-	{
-		if ((previous >> (i * 2)) % 4 == numCliques)
-		{
-			previous -= numCliques << (i * 2);
-			previous += 1 << (i * 2 + 2);
-		}
-	}
-	if (previous >> 30 == 1) return 0;
-	return previous;
-}
-
-uint32_t getTrivialSolution(int leftSize, int rightSize, int connections)
-{
-	uint32_t result = 0;
-	if (rightSize < leftSize)
-	{
-		for (int i = 0; i < 16; i++)
-		{
-			auto val = i % 4;
-			if (val >= rightSize) val = 0;
-			result += val << (i * 2);
-		}
-	}
-	else
-	{
-		for (int i = 0; i < 16; i++)
-		{
-			auto val = i / 4;
-			if (val >= leftSize) val = 0;
-			result += val << (i * 2);
-		}
-	}
-	return result;
-}
-
-uint32_t solveOneClique(int leftSize, int rightSize, int connections)
-{
-	int maxSize = std::min(leftSize, rightSize);
-	if (isClique(leftSize, rightSize, 0, connections)) return 0;
-	assert(popcount(connections) >= maxSize);
-	for (int numCliques = 2; numCliques < maxSize; numCliques++)
-	{
-		uint32_t firstSolution = 0;
-		if (isClique(leftSize, rightSize, firstSolution, connections)) return firstSolution;
-		uint32_t solution = nextSolution(leftSize, rightSize, firstSolution, numCliques);
-		while (solution != 0)
-		{
-			if (isClique(leftSize, rightSize, solution, connections)) return solution;
-			solution = nextSolution(leftSize, rightSize, solution, numCliques);
-		}
-	}
-	uint32_t solution = getTrivialSolution(leftSize, rightSize, connections);
-	assert(isClique(leftSize, rightSize, solution, connections));
-	return solution;
-}
-
-std::vector<uint32_t> presolvedCliques()
-{
-	std::vector<uint32_t> result;
-	result.reserve(4 * 4 * 65536);
-	for (int leftSize = 1; leftSize <= 4; leftSize++)
-	{
-		for (int rightSize = 1; rightSize <= 4; rightSize++)
-		{
-			for (int connections = 0; connections < 65536; connections++)
-			{
-				result.push_back(solveOneClique(leftSize, rightSize, connections));
-			}
-		}
-	}
-	return result;
-}
-
-uint32_t getCliqueSolution(size_t problemNumber)
-{
-	static std::unordered_map<size_t, uint32_t> cache;
-	auto found = cache.find(problemNumber);
-	if (found == cache.end())
-	{
-		cache[problemNumber] = solveOneClique(problemNumber / (4 * 65536) + 1, (problemNumber / 65536) % 4 + 1, problemNumber % 65536);
-		found = cache.find(problemNumber);
-	}
-	return found->second;
-}
-
 std::vector<NodeClique> solveCliques(const std::vector<std::pair<size_t, bool>>& component, const GroupingBluntify& graph)
 {
-	SizeArray<size_t, 4> left;
-	SizeArray<size_t, 4> right;
-	std::array<bool, 16> connected {0};
+	std::vector<size_t> left;
+	std::vector<size_t> right;
+	std::map<size_t, size_t> leftMapping;
+	std::map<size_t, size_t> rightMapping;
 	for (auto pair : component)
 	{
 		if (pair.second)
 		{
+			rightMapping[pair.first] = right.size();
 			right.push_back(pair.first);
 		}
 		else
 		{
+			leftMapping[pair.first] = left.size();
 			left.push_back(pair.first);
 		}
 	}
@@ -310,6 +175,13 @@ std::vector<NodeClique> solveCliques(const std::vector<std::pair<size_t, bool>>&
 	}
 	assert(left.size() >= 1);
 	assert(right.size() >= 1);
+	assert(left.size() <= 64); //todo handle larger
+	assert(right.size() <= 64); //todo handle larger
+	std::vector<uint64_t> leftConnections;
+	std::vector<uint64_t> rightConnections;
+	leftConnections.resize(left.size(), 0);
+	rightConnections.resize(right.size(), 0);
+	std::vector<std::pair<size_t, size_t>> links;
 	for (size_t i = 0; i < left.size(); i++)
 	{
 		for (size_t j = 0; j < right.size(); j++)
@@ -324,31 +196,76 @@ std::vector<NodeClique> solveCliques(const std::vector<std::pair<size_t, bool>>&
 			}
 			if (found)
 			{
-				connected[i*4+j] = true;
+				leftConnections[i] |= ((uint64_t)1) << j;
+				rightConnections[j] |= ((uint64_t)1) << i;
+				links.emplace_back(i, j);
 			}
 		}
 	}
-	size_t problemNumber = 0;
-	problemNumber = (left.size()-1) * 65536 * 4 + (right.size()-1) * 65536;
-	for (size_t i = 0; i < 16; i++)
+	std::vector<size_t> leftExemplars;
+	std::vector<size_t> leftBelongsToClass;
+	leftBelongsToClass.resize(left.size(), std::numeric_limits<size_t>::max());
+	for (size_t i = 0; i < left.size(); i++)
 	{
-		if (connected[i]) problemNumber += (1 << i);
-	}
-	uint32_t solution = getCliqueSolution(problemNumber);
-	std::vector<NodeClique> result;
-	result.resize(4);
-	for (int i = 0; i < left.size(); i++)
-	{
-		for (int j = 0; j < right.size(); j++)
+		bool found = false;
+		for (size_t j = 0; j < leftExemplars.size(); j++)
 		{
-			if (!connected[i * 4 + j]) continue;
-			auto cliqueNum = (solution >> ((i * 4 + j) * 2)) % 4;
-			result[cliqueNum].left.insert(left[i]);
-			result[cliqueNum].right.insert(right[j]);
+			if (leftExemplars[j] == leftConnections[i])
+			{
+				found = true;
+				leftBelongsToClass[i] = j;
+				break;
+			}
+		}
+		if (!found)
+		{
+			leftBelongsToClass[i] = leftExemplars.size();
+			leftExemplars.push_back(leftConnections[i]);
 		}
 	}
-	while (result.size() > 0 && result.back().left.size() == 0 && result.back().right.size() == 0) result.pop_back();
-	assert(result.size() > 0);
+	std::vector<size_t> rightExemplars;
+	std::vector<size_t> rightBelongsToClass;
+	rightBelongsToClass.resize(right.size(), std::numeric_limits<size_t>::max());
+	for (size_t i = 0; i < right.size(); i++)
+	{
+		bool found = false;
+		for (size_t j = 0; j < rightExemplars.size(); j++)
+		{
+			if (rightExemplars[j] == rightConnections[i])
+			{
+				found = true;
+				rightBelongsToClass[i] = j;
+				break;
+			}
+		}
+		if (!found)
+		{
+			rightBelongsToClass[i] = rightExemplars.size();
+			rightExemplars.push_back(rightConnections[i]);
+		}
+	}
+
+	std::vector<NodeClique> result;
+	if (leftExemplars.size() < rightExemplars.size())
+	{
+		result.resize(leftExemplars.size());
+		for (auto link : links)
+		{
+			auto clique = leftBelongsToClass[link.first];
+			result[clique].left.insert(left[link.first]);
+			result[clique].right.insert(right[link.second]);
+		}
+	}
+	else
+	{
+		result.resize(rightExemplars.size());
+		for (auto link : links)
+		{
+			auto clique = rightBelongsToClass[link.second];
+			result[clique].left.insert(left[link.first]);
+			result[clique].right.insert(right[link.second]);
+		}
+	}
 
 #ifndef NDEBUG
 
@@ -800,6 +717,6 @@ int main(int argc, char** argv)
 	std::cerr << "overlap " << graph.overlap << " size " << graph.items.size() << std::endl;
 	// printGraph(graph);
 	verifyGraph(graph);
-	auto doublestranded = dontMergeReverses(graph);
+	auto doublestranded = mergeReverses(graph);
 	writeResultGfa(doublestranded, argv[1], argv[2]);
 }
