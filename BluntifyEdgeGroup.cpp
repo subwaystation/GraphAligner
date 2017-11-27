@@ -11,6 +11,8 @@
 #include <array>
 #include <cassert>
 
+typedef uint32_t NodeType;
+
 template <typename T, size_t N>
 class SizeArray : public std::array<T, N>
 {
@@ -57,10 +59,10 @@ public:
 class EdgeGroupingItem
 {
 public:
-	SizeArray<size_t, 4> leftCliques;
-	SizeArray<size_t, 4> leftEdges;
-	SizeArray<size_t, 4> rightCliques;
-	SizeArray<size_t, 4> rightEdges;
+	SizeArray<NodeType, 4> leftCliques;
+	SizeArray<NodeType, 4> leftEdges;
+	SizeArray<NodeType, 4> rightCliques;
+	SizeArray<NodeType, 4> rightEdges;
 	OriginalPosition original;
 };
 
@@ -76,14 +78,14 @@ class BluntedCliques
 {
 public:
 	std::vector<OriginalPosition> originalNodeAndOffset;
-	std::vector<std::pair<size_t, size_t>> edges;
+	std::vector<std::pair<NodeType, NodeType>> edges;
 };
 
 class NodeClique
 {
 public:
-	std::set<size_t> left;
-	std::set<size_t> right;
+	std::set<NodeType> left;
+	std::set<NodeType> right;
 };
 
 GroupingBluntify getSmallerGraph(const BluntedCliques& cliques, int oldOverlap)
@@ -102,13 +104,13 @@ GroupingBluntify getSmallerGraph(const BluntedCliques& cliques, int oldOverlap)
 		auto to = cliques.edges[i].second;
 		assert(from < result.items.size());
 		assert(to < result.items.size());
-		result.items[from].leftEdges.push_back(to);
-		result.items[to].rightEdges.push_back(from);
+		result.items[from].leftEdges.push_unique(to);
+		result.items[to].rightEdges.push_unique(from);
 	}
 	return result;
 }
 
-void fillComponent(std::vector<std::pair<size_t, bool>>& component, const GroupingBluntify& graph, size_t pos, bool side)
+void fillComponent(std::vector<std::pair<NodeType, bool>>& component, const GroupingBluntify& graph, NodeType pos, bool side)
 {
 	if (std::any_of(component.begin(), component.end(), [pos, side](auto pair) { return pair.first == pos && pair.second == side; }))
 	{
@@ -131,29 +133,25 @@ void fillComponent(std::vector<std::pair<size_t, bool>>& component, const Groupi
 	}
 }
 
-std::vector<std::pair<size_t, bool>> getComponent(const GroupingBluntify& graph, size_t pos, bool side)
+std::vector<std::pair<NodeType, bool>> getComponent(const GroupingBluntify& graph, NodeType pos, bool side)
 {
-	std::vector<std::pair<size_t, bool>> result;
+	std::vector<std::pair<NodeType, bool>> result;
 	fillComponent(result, graph, pos, side);
 	return result;
 }
 
-std::vector<NodeClique> solveCliques(const std::vector<std::pair<size_t, bool>>& component, const GroupingBluntify& graph)
+std::vector<NodeClique> solveCliques(const std::vector<std::pair<NodeType, bool>>& component, const GroupingBluntify& graph)
 {
-	std::vector<size_t> left;
-	std::vector<size_t> right;
-	std::map<size_t, size_t> leftMapping;
-	std::map<size_t, size_t> rightMapping;
+	std::vector<NodeType> left;
+	std::vector<NodeType> right;
 	for (auto pair : component)
 	{
 		if (pair.second)
 		{
-			rightMapping[pair.first] = right.size();
 			right.push_back(pair.first);
 		}
 		else
 		{
-			leftMapping[pair.first] = left.size();
 			left.push_back(pair.first);
 		}
 	}
@@ -181,7 +179,7 @@ std::vector<NodeClique> solveCliques(const std::vector<std::pair<size_t, bool>>&
 	std::vector<uint64_t> rightConnections;
 	leftConnections.resize(left.size(), 0);
 	rightConnections.resize(right.size(), 0);
-	std::vector<std::pair<size_t, size_t>> links;
+	std::vector<std::pair<NodeType, NodeType>> links;
 	for (size_t i = 0; i < left.size(); i++)
 	{
 		for (size_t j = 0; j < right.size(); j++)
@@ -202,9 +200,9 @@ std::vector<NodeClique> solveCliques(const std::vector<std::pair<size_t, bool>>&
 			}
 		}
 	}
-	std::vector<size_t> leftExemplars;
-	std::vector<size_t> leftBelongsToClass;
-	leftBelongsToClass.resize(left.size(), std::numeric_limits<size_t>::max());
+	std::vector<uint64_t> leftExemplars;
+	std::vector<NodeType> leftBelongsToClass;
+	leftBelongsToClass.resize(left.size(), std::numeric_limits<NodeType>::max());
 	for (size_t i = 0; i < left.size(); i++)
 	{
 		bool found = false;
@@ -223,9 +221,9 @@ std::vector<NodeClique> solveCliques(const std::vector<std::pair<size_t, bool>>&
 			leftExemplars.push_back(leftConnections[i]);
 		}
 	}
-	std::vector<size_t> rightExemplars;
-	std::vector<size_t> rightBelongsToClass;
-	rightBelongsToClass.resize(right.size(), std::numeric_limits<size_t>::max());
+	std::vector<uint64_t> rightExemplars;
+	std::vector<NodeType> rightBelongsToClass;
+	rightBelongsToClass.resize(right.size(), std::numeric_limits<NodeType>::max());
 	for (size_t i = 0; i < right.size(); i++)
 	{
 		bool found = false;
@@ -309,13 +307,13 @@ void fillEdgeCliques(GroupingBluntify& graph)
 				{
 					assert(!leftHandled[node]);
 					assert(node < graph.items.size());
-					graph.items[node].leftCliques.push_back(totalCliques);
+					graph.items[node].leftCliques.push_unique(totalCliques);
 				}
 				for (auto node : clique.right)
 				{
 					assert(!rightHandled[node]);
 					assert(node < graph.items.size());
-					graph.items[node].rightCliques.push_back(totalCliques);
+					graph.items[node].rightCliques.push_unique(totalCliques);
 				}
 				totalCliques++;
 			}
@@ -341,13 +339,13 @@ void fillEdgeCliques(GroupingBluntify& graph)
 				{
 					assert(!leftHandled[node]);
 					assert(node < graph.items.size());
-					graph.items[node].leftCliques.push_back(totalCliques);
+					graph.items[node].leftCliques.push_unique(totalCliques);
 				}
 				for (auto node : clique.right)
 				{
 					assert(!rightHandled[node]);
 					assert(node < graph.items.size());
-					graph.items[node].rightCliques.push_back(totalCliques);
+					graph.items[node].rightCliques.push_unique(totalCliques);
 				}
 				totalCliques++;
 			}
@@ -369,7 +367,7 @@ void fillEdgeCliques(GroupingBluntify& graph)
 BluntedCliques getBluntedCliques(const GroupingBluntify& grouping)
 {
 	BluntedCliques result;
-	size_t size = 0;
+	NodeType size = 0;
 	for (size_t i = 0; i < grouping.items.size(); i++)
 	{
 		for (size_t j = 0; j < grouping.items[i].leftCliques.size(); j++)
@@ -417,10 +415,7 @@ BluntedCliques getBluntedCliques(const GroupingBluntify& grouping)
 GroupingBluntify loadUnbluntGFA(std::string filename)
 {
 	size_t resultSize = 0;
-	size_t numNodes = 0;
-	std::unordered_map<int, size_t> originalNodeStarts;
-	std::unordered_map<int, size_t> originalNodeReverse;
-	std::unordered_map<int, size_t> originalNodeEnds;
+	std::unordered_map<int, std::tuple<NodeType, NodeType, NodeType>> originalNodePos;
 	GroupingBluntify result;
 	{
 		std::ifstream file { filename };
@@ -457,14 +452,16 @@ GroupingBluntify loadUnbluntGFA(std::string filename)
 				line >> dummy >> id >> seq;
 				assert(seq.size() > result.overlap);
 				auto nodeSize = seq.size() - result.overlap;
-				originalNodeStarts[id] = resultSize;
-				originalNodeReverse[id] = resultSize + nodeSize;
+				std::tuple<NodeType, NodeType, NodeType> posInfo;
+				std::get<0>(posInfo) = resultSize;
+				std::get<1>(posInfo) = resultSize + nodeSize;
 				resultSize += nodeSize * 2;
-				numNodes += 1;
-				originalNodeEnds[id] = resultSize - 1;
+				std::get<2>(posInfo) = resultSize - 1;
+				originalNodePos[id] = posInfo;
 			}
 		}
 	}
+	assert(resultSize < std::numeric_limits<NodeType>::max());
 	result.items.resize(resultSize);
 	{
 		size_t pos = 0;
@@ -479,27 +476,31 @@ GroupingBluntify loadUnbluntGFA(std::string filename)
 				std::string dummy, seq;
 				int id;
 				line >> dummy >> id >> seq;
+				assert(pos < result.items.size());
 				result.items[pos].original.id = id;
 				result.items[pos].original.offset = 0;
 				result.items[pos].original.reverse = false;
 				assert(seq.size() > result.overlap);
 				auto nodeSize = seq.size() - result.overlap;
+				assert(pos + nodeSize < result.items.size());
 				for (size_t i = 1; i < nodeSize; i++)
 				{
-					result.items[pos+i-1].leftEdges.push_back(pos+i);
-					result.items[pos+i].rightEdges.push_back(pos+i-1);
+					result.items[pos+i-1].leftEdges.push_unique(pos+i);
+					result.items[pos+i].rightEdges.push_unique(pos+i-1);
 					result.items[pos+i].original.id = id;
 					result.items[pos+i].original.offset = i;
 					result.items[pos+i].original.reverse = false;
 				}
 				pos += nodeSize;
+				assert(pos < result.items.size());
 				result.items[pos].original.id = id;
 				result.items[pos].original.offset = seq.size() - 1;
 				result.items[pos].original.reverse = true;
+				assert(pos + nodeSize < result.items.size());
 				for (size_t i = 1; i < nodeSize; i++)
 				{
-					result.items[pos+i-1].leftEdges.push_back(pos+i);
-					result.items[pos+i].rightEdges.push_back(pos+i-1);
+					result.items[pos+i-1].leftEdges.push_unique(pos+i);
+					result.items[pos+i].rightEdges.push_unique(pos+i-1);
 					result.items[pos+i].original.id = id;
 					result.items[pos+i].original.offset = seq.size() - 1 - i;
 					result.items[pos+i].original.reverse = true;
@@ -513,20 +514,26 @@ GroupingBluntify loadUnbluntGFA(std::string filename)
 				line >> dummy >> fromid >> fromstart >> toid >> toend >> overlap;
 				assert(fromstart == "+" || fromstart == "-");
 				assert(toend == "+" || toend == "-");
-				auto start1 = originalNodeReverse[fromid] - 1;
-				auto end1 = originalNodeStarts[toid];
-				auto start2 = originalNodeEnds[toid];
-				auto end2 = originalNodeReverse[fromid];
+				auto frominfo = originalNodePos[fromid];
+				auto toinfo = originalNodePos[toid];
+				auto start1 = std::get<1>(frominfo) - 1;
+				auto end1 = std::get<0>(toinfo);
+				auto start2 = std::get<2>(toinfo);
+				auto end2 = std::get<1>(frominfo);
 				if (fromstart == "-")
 				{
-					start1 = originalNodeEnds[fromid];
-					end2 = originalNodeStarts[fromid];
+					start1 = std::get<2>(frominfo);
+					end2 = std::get<0>(frominfo);
 				}
 				if (toend == "-")
 				{
-					end1 = originalNodeReverse[toid];
-					start2 = originalNodeReverse[toid] - 1;
+					end1 = std::get<1>(toinfo);
+					start2 = std::get<1>(toinfo) - 1;
 				}
+				assert(start1 < result.items.size());
+				assert(start2 < result.items.size());
+				assert(end1 < result.items.size());
+				assert(end2 < result.items.size());
 				result.items[start1].leftEdges.push_unique(end1);
 				result.items[start2].leftEdges.push_unique(end2);
 				result.items[end1].rightEdges.push_unique(start1);
@@ -544,7 +551,7 @@ class DoublestrandedResult
 {
 public:
 	std::vector<std::pair<int, int>> nodes;
-	std::vector<std::tuple<size_t, bool, size_t, bool>> edges;
+	std::vector<std::tuple<NodeType, bool, NodeType, bool>> edges;
 };
 
 DoublestrandedResult dontMergeReverses(const GroupingBluntify& graph)
@@ -565,7 +572,7 @@ DoublestrandedResult dontMergeReverses(const GroupingBluntify& graph)
 DoublestrandedResult mergeReverses(const GroupingBluntify& graph)
 {
 	std::map<OriginalPosition, std::set<OriginalPosition>> edges;
-	std::map<std::pair<int, int>, size_t> resultPositions;
+	std::map<std::pair<int, int>, NodeType> resultPositions;
 	DoublestrandedResult result;
 	for (size_t i = 0; i < graph.items.size(); i++)
 	{
@@ -632,11 +639,11 @@ void writeResultGfa(const DoublestrandedResult& graph, std::string originalGraph
 			assert(originalSequences.count(node) == 1);
 			assert(originalSequences[node].size() > pos);
 			char seq = originalSequences[node][pos];
-			file << "S\t" << i << "\t" << seq << std::endl;
+			file << "S\t" << (i + 1) << "\t" << seq << std::endl;
 		}
 		for (auto edge : graph.edges)
 		{
-			file << "L\t" << std::get<0>(edge) << "\t" << (std::get<1>(edge) ? "+" : "-") << "\t" << std::get<2>(edge) << "\t" << (std::get<3>(edge) ? "+" : "-") << "\t0M" << std::endl;
+			file << "L\t" << (std::get<0>(edge) + 1) << "\t" << (std::get<1>(edge) ? "+" : "-") << "\t" << (std::get<2>(edge) + 1) << "\t" << (std::get<3>(edge) ? "+" : "-") << "\t0M" << std::endl;
 		}
 	}
 }
