@@ -12,6 +12,74 @@
 #include <cassert>
 
 typedef uint32_t NodeType;
+enum NodeEnd {End, Start};
+typedef std::pair<NodeType, NodeEnd> NodePos;
+
+template <typename T>
+class PosVector
+{
+public:
+	size_t size() const
+	{
+		return first.size();
+	}
+	void resize(size_t size)
+	{
+		first.resize(size);
+		second.resize(size);
+	}
+	void resize(size_t size, T val)
+	{
+		first.resize(size, val);
+		second.resize(size, val);
+	}
+	T& operator[](NodePos pos)
+	{
+		if (pos.second == NodeEnd::End) return second[pos.first];
+		return first[pos.first];
+	}
+	const T& operator[](NodePos pos) const
+	{
+		if (pos.second == NodeEnd::End) return second[pos.first];
+		return first[pos.first];
+	}
+private:
+	std::vector<T> first;
+	std::vector<T> second;
+};
+
+template <>
+class PosVector<bool>
+{
+public:
+	size_t size() const
+	{
+		return first.size();
+	}
+	void resize(size_t size)
+	{
+		first.resize(size);
+		second.resize(size);
+	}
+	void resize(size_t size, bool val)
+	{
+		first.resize(size, val);
+		second.resize(size, val);
+	}
+	auto operator[](NodePos pos)
+	{
+		if (pos.second == NodeEnd::End) return second[pos.first];
+		return first[pos.first];
+	}
+	auto operator[](NodePos pos) const
+	{
+		if (pos.second == NodeEnd::End) return second[pos.first];
+		return first[pos.first];
+	}
+private:
+	std::vector<bool> first;
+	std::vector<bool> second;
+};
 
 template <typename T, size_t N>
 class SizeArray : public std::array<T, N>
@@ -32,9 +100,23 @@ public:
 		}
 		push_back(val);
 	}
+	template <typename... Args>
+	void push_unique(Args... args)
+	{
+		T val {args...};
+		push_unique(val);
+	}
 	size_t size() const
 	{
 		return elems;
+	}
+	typename std::array<T, N>::iterator end()
+	{
+		return std::array<T, N>::begin() + elems;
+	}
+	typename std::array<T, N>::const_iterator end() const
+	{
+		return std::array<T, N>::begin() + elems;
 	}
 private:
 	char elems;
@@ -59,11 +141,8 @@ public:
 class EdgeGroupingItem
 {
 public:
-	SizeArray<NodeType, 4> leftCliques;
-	SizeArray<NodeType, 4> leftEdges;
-	SizeArray<NodeType, 4> rightCliques;
-	SizeArray<NodeType, 4> rightEdges;
-	OriginalPosition original;
+	SizeArray<NodePos, 4> edges;
+	SizeArray<NodePos, 4> cliques;
 };
 
 class GroupingBluntify
@@ -71,21 +150,38 @@ class GroupingBluntify
 public:
 	GroupingBluntify() : overlap(-1), items() {};
 	int overlap;
-	std::vector<EdgeGroupingItem> items;
+	PosVector<EdgeGroupingItem> items;
+	std::vector<OriginalPosition> originals;
+	SizeArray<NodePos, 4>& neighbors(NodeType pos, NodeEnd side)
+	{
+		return items[{pos, side}].edges;
+	}
+	SizeArray<NodePos, 4>& neighbors(NodePos pos)
+	{
+		return items[pos].edges;
+	}
+	const SizeArray<NodePos, 4>& neighbors(NodeType pos, NodeEnd side) const
+	{
+		return items[{pos, side}].edges;
+	}
+	const SizeArray<NodePos, 4>& neighbors(NodePos pos) const
+	{
+		return items[pos].edges;
+	}
 };
 
 class BluntedCliques
 {
 public:
 	std::vector<OriginalPosition> originalNodeAndOffset;
-	std::vector<std::pair<NodeType, NodeType>> edges;
+	std::vector<std::pair<NodePos, NodePos>> edges;
 };
 
 class NodeClique
 {
 public:
-	std::set<NodeType> left;
-	std::set<NodeType> right;
+	std::set<NodePos> left;
+	std::set<NodePos> right;
 };
 
 GroupingBluntify getSmallerGraph(const BluntedCliques& cliques, int oldOverlap)
@@ -94,272 +190,263 @@ GroupingBluntify getSmallerGraph(const BluntedCliques& cliques, int oldOverlap)
 	GroupingBluntify result;
 	result.overlap = oldOverlap-1;
 	result.items.resize(cliques.originalNodeAndOffset.size());
+	result.originals.resize(cliques.originalNodeAndOffset.size());
 	for (size_t i = 0; i < cliques.originalNodeAndOffset.size(); i++)
 	{
-		result.items[i].original = cliques.originalNodeAndOffset[i];
+		result.originals[i] = cliques.originalNodeAndOffset[i];
 	}
 	for (size_t i = 0; i < cliques.edges.size(); i++)
 	{
 		auto from = cliques.edges[i].first;
 		auto to = cliques.edges[i].second;
-		assert(from < result.items.size());
-		assert(to < result.items.size());
-		result.items[from].leftEdges.push_unique(to);
-		result.items[to].rightEdges.push_unique(from);
+		assert(from.first < result.items.size());
+		assert(to.first < result.items.size());
+		result.items[from].edges.push_unique(to);
+		result.items[to].edges.push_unique(from);
 	}
 	return result;
 }
 
-void fillComponent(std::vector<std::pair<NodeType, bool>>& component, const GroupingBluntify& graph, NodeType pos, bool side)
+void partitionRec(NodePos pos, bool side, PosVector<bool>& partitioned, PosVector<bool>& handled, const GroupingBluntify& graph)
 {
-	if (std::any_of(component.begin(), component.end(), [pos, side](auto pair) { return pair.first == pos && pair.second == side; }))
+	assert(!handled[pos]);
+	handled[pos] = true;
+	partitioned[pos] = side;
+	for (auto neighbor : graph.neighbors(pos))
 	{
-		return;
-	}
-	component.emplace_back(pos, side);
-	if (side)
-	{
-		for (size_t i = 0; i < graph.items[pos].rightEdges.size(); i++)
+		if (handled[neighbor] && neighbor != pos)
 		{
-			fillComponent(component, graph, graph.items[pos].rightEdges[i], false);
-		}
-	}
-	else
-	{
-		for (size_t i = 0; i < graph.items[pos].leftEdges.size(); i++)
-		{
-			fillComponent(component, graph, graph.items[pos].leftEdges[i], true);
-		}
-	}
-}
-
-std::vector<std::pair<NodeType, bool>> getComponent(const GroupingBluntify& graph, NodeType pos, bool side)
-{
-	std::vector<std::pair<NodeType, bool>> result;
-	fillComponent(result, graph, pos, side);
-	return result;
-}
-
-std::vector<NodeClique> solveCliques(const std::vector<std::pair<NodeType, bool>>& component, const GroupingBluntify& graph)
-{
-	std::vector<NodeType> left;
-	std::vector<NodeType> right;
-	for (auto pair : component)
-	{
-		if (pair.second)
-		{
-			right.push_back(pair.first);
+			assert(partitioned[neighbor] != side);
 		}
 		else
 		{
-			left.push_back(pair.first);
+			partitionRec(neighbor, !side, partitioned, handled, graph);
 		}
 	}
-	if (left.size() == 0)
+}
+
+void partition(PosVector<bool>& partitioned, const GroupingBluntify& graph)
+{
+	PosVector<bool> handled;
+	handled.resize(graph.items.size(), false);
+	for (size_t i = 0; i < graph.items.size(); i++)
 	{
-		assert(right.size() == 1);
-		std::vector<NodeClique> result;
-		result.emplace_back();
-		result.back().right.insert(right[0]);
-		return result;
-	}
-	if (right.size() == 0)
-	{
-		assert(left.size() == 1);
-		std::vector<NodeClique> result;
-		result.emplace_back();
-		result.back().left.insert(left[0]);
-		return result;
-	}
-	assert(left.size() >= 1);
-	assert(right.size() >= 1);
-	assert(left.size() <= 64); //todo handle larger
-	assert(right.size() <= 64); //todo handle larger
-	std::vector<uint64_t> leftConnections;
-	std::vector<uint64_t> rightConnections;
-	leftConnections.resize(left.size(), 0);
-	rightConnections.resize(right.size(), 0);
-	std::vector<std::pair<NodeType, NodeType>> links;
-	for (size_t i = 0; i < left.size(); i++)
-	{
-		for (size_t j = 0; j < right.size(); j++)
+		if (!handled[{i, NodeEnd::Start}])
 		{
-			bool found = false;
-			for (size_t k = 0; k < graph.items[left[i]].leftEdges.size(); k++)
+			partitionRec({i, NodeEnd::Start}, false, partitioned, handled, graph);
+		}
+		if (!handled[{i, NodeEnd::End}])
+		{
+			partitionRec({i, NodeEnd::End}, true, partitioned, handled, graph);
+		}
+	}
+}
+
+void getComponentRec(NodePos pos, PosVector<bool>& partitioned, PosVector<bool>& componentHandled, const GroupingBluntify& graph, std::pair<std::vector<NodePos>, std::vector<NodePos>>& result)
+{
+	assert(!componentHandled[pos]);
+	componentHandled[pos] = true;
+	if (partitioned[pos]) result.second.push_back(pos); else result.first.push_back(pos);
+	for (auto neighbor : graph.neighbors(pos))
+	{
+		if (!componentHandled[neighbor]) getComponentRec(neighbor, partitioned, componentHandled, graph, result);
+	}
+}
+
+std::pair<std::vector<NodePos>, std::vector<NodePos>> getComponent(NodePos pos, PosVector<bool>& partitioned, PosVector<bool>& componentHandled, const GroupingBluntify& graph)
+{
+	std::pair<std::vector<NodePos>, std::vector<NodePos>> result;
+	getComponentRec(pos, partitioned, componentHandled, graph, result);
+	return result;
+}
+
+bool connected(NodePos first, NodePos second, const GroupingBluntify& graph)
+{
+	for (auto neighbor : graph.neighbors(first))
+	{
+		if (neighbor == second) return true;
+	}
+	return false;
+}
+
+bool edgeEqual(NodePos first, NodePos second, const GroupingBluntify& graph)
+{
+	auto firstNeighbors = graph.neighbors(first);
+	auto secondNeighbors = graph.neighbors(second);
+	if (firstNeighbors.size() != secondNeighbors.size()) return false;
+	for (auto firstNeighbor : firstNeighbors)
+	{
+		bool found = false;
+		for (auto secondNeighbor : secondNeighbors)
+		{
+			if (secondNeighbor == firstNeighbor) found = true;
+		}
+		if (!found) return false;
+	}
+	for (auto secondNeighbor : secondNeighbors)
+	{
+		bool found = false;
+		for (auto firstNeighbor : firstNeighbors)
+		{
+			if (firstNeighbor == secondNeighbor) found = true;
+		}
+		if (!found) return false;
+	}
+	return true;
+}
+
+std::vector<NodeClique> solveCliques(const std::pair<std::vector<NodePos>, std::vector<NodePos>>& component, const GroupingBluntify& graph)
+{
+	if (component.first.size() == 0)
+	{
+		assert(component.second.size() == 1);
+		std::vector<NodeClique> result;
+		result.emplace_back();
+		result.back().right.insert(component.second[0]);
+		return result;
+	}
+	if (component.second.size() == 0)
+	{
+		assert(component.first.size() == 1);
+		std::vector<NodeClique> result;
+		result.emplace_back();
+		result.back().left.insert(component.first[0]);
+		return result;
+	}
+	std::vector<size_t> equalToLeft;
+	std::vector<size_t> equalToRight;
+	equalToLeft.resize(component.first.size());
+	equalToRight.resize(component.second.size());
+	size_t leftDistinct = 0;
+	size_t rightDistinct = 0;
+	for (size_t i = 0; i < equalToLeft.size(); i++)
+	{
+		bool equal = false;
+		for (size_t j = 0; j < i; j++)
+		{
+			if (edgeEqual(component.first[i], component.first[j], graph))
 			{
-				if (graph.items[left[i]].leftEdges[k] == right[j])
+				equal = true;
+				equalToLeft[i] = j;
+				break;
+			}
+		}
+		if (!equal)
+		{
+			equalToLeft[i] = i;
+			leftDistinct++;
+		}
+	}
+	for (size_t i = 0; i < equalToRight.size(); i++)
+	{
+		bool equal = false;
+		for (size_t j = 0; j < i; j++)
+		{
+			if (edgeEqual(component.second[i], component.second[j], graph))
+			{
+				equal = true;
+				equalToRight[i] = j;
+				break;
+			}
+		}
+		if (!equal)
+		{
+			equalToRight[i] = i;
+			rightDistinct++;
+		}
+	}
+	std::vector<NodeClique> result;
+	if (leftDistinct < rightDistinct)
+	{
+		std::vector<size_t> leftInClique;
+		leftInClique.resize(component.first.size());
+		for (size_t i = 0; i < component.first.size(); i++)
+		{
+			if (equalToLeft[i] == i)
+			{
+				leftInClique[i] = result.size();
+				result.emplace_back();
+				result.back().left.insert(component.first[i]);
+				for (auto other : component.second)
 				{
-					found = true;
+					if (connected(component.first[i], other, graph)) result.back().right.insert(other);
 				}
 			}
-			if (found)
+			else
 			{
-				leftConnections[i] |= ((uint64_t)1) << j;
-				rightConnections[j] |= ((uint64_t)1) << i;
-				links.emplace_back(i, j);
+				assert(equalToLeft[i] < i);
+				result[equalToLeft[i]].left.insert(component.first[i]);
+				leftInClique[i] = leftInClique[equalToLeft[i]];
 			}
 		}
-	}
-	std::vector<uint64_t> leftExemplars;
-	std::vector<NodeType> leftBelongsToClass;
-	leftBelongsToClass.resize(left.size(), std::numeric_limits<NodeType>::max());
-	for (size_t i = 0; i < left.size(); i++)
-	{
-		bool found = false;
-		for (size_t j = 0; j < leftExemplars.size(); j++)
-		{
-			if (leftExemplars[j] == leftConnections[i])
-			{
-				found = true;
-				leftBelongsToClass[i] = j;
-				break;
-			}
-		}
-		if (!found)
-		{
-			leftBelongsToClass[i] = leftExemplars.size();
-			leftExemplars.push_back(leftConnections[i]);
-		}
-	}
-	std::vector<uint64_t> rightExemplars;
-	std::vector<NodeType> rightBelongsToClass;
-	rightBelongsToClass.resize(right.size(), std::numeric_limits<NodeType>::max());
-	for (size_t i = 0; i < right.size(); i++)
-	{
-		bool found = false;
-		for (size_t j = 0; j < rightExemplars.size(); j++)
-		{
-			if (rightExemplars[j] == rightConnections[i])
-			{
-				found = true;
-				rightBelongsToClass[i] = j;
-				break;
-			}
-		}
-		if (!found)
-		{
-			rightBelongsToClass[i] = rightExemplars.size();
-			rightExemplars.push_back(rightConnections[i]);
-		}
-	}
-
-	std::vector<NodeClique> result;
-	if (leftExemplars.size() < rightExemplars.size())
-	{
-		result.resize(leftExemplars.size());
-		for (auto link : links)
-		{
-			auto clique = leftBelongsToClass[link.first];
-			result[clique].left.insert(left[link.first]);
-			result[clique].right.insert(right[link.second]);
-		}
+		assert(result.size() == leftDistinct);
 	}
 	else
 	{
-		result.resize(rightExemplars.size());
-		for (auto link : links)
+		std::vector<size_t> rightInClique;
+		rightInClique.resize(component.second.size());
+		for (size_t i = 0; i < component.second.size(); i++)
 		{
-			auto clique = rightBelongsToClass[link.second];
-			result[clique].left.insert(left[link.first]);
-			result[clique].right.insert(right[link.second]);
-		}
-	}
-
-#ifndef NDEBUG
-
-	for (size_t i = 0; i < result.size(); i++)
-	{
-		for (auto leftnode : result[i].left)
-		{
-			for (auto rightnode : result[i].right)
+			if (equalToRight[i] == i)
 			{
-				bool found = false;
-				for (size_t k = 0; k < graph.items[leftnode].leftEdges.size(); k++)
+				rightInClique[i] = result.size();
+				result.emplace_back();
+				result.back().right.insert(component.second[i]);
+				for (auto other : component.first)
 				{
-					if (graph.items[leftnode].leftEdges[k] == rightnode) found = true;
+					if (connected(component.second[i], other, graph)) result.back().left.insert(other);
 				}
-				assert(found);
+			}
+			else
+			{
+				assert(equalToRight[i] < i);
+				result[equalToRight[i]].right.insert(component.second[i]);
+				rightInClique[i] = rightInClique[equalToRight[i]];
 			}
 		}
+		assert(result.size() == rightDistinct);
 	}
+	return result;
+}
 
-#endif
-
+std::vector<NodeClique> getCliques(const GroupingBluntify& graph)
+{
+	PosVector<bool> partitioned;
+	partitioned.resize(graph.items.size(), false);
+	partition(partitioned, graph);
+	PosVector<bool> componentHandled;
+	componentHandled.resize(graph.items.size(), false);
+	std::vector<NodeClique> result;
+	for (size_t i = 0; i < graph.items.size(); i++)
+	{
+		if (!componentHandled[{i, NodeEnd::Start}])
+		{
+			auto component = getComponent({i, NodeEnd::Start}, partitioned, componentHandled, graph);
+			auto cliques = solveCliques(component, graph);
+			result.insert(result.end(), cliques.begin(), cliques.end());
+		}
+		if (!componentHandled[{i, NodeEnd::End}])
+		{
+			auto component = getComponent({i, NodeEnd::End}, partitioned, componentHandled, graph);
+			auto cliques = solveCliques(component, graph);
+			result.insert(result.end(), cliques.begin(), cliques.end());
+		}
+	}
 	return result;
 }
 
 void fillEdgeCliques(GroupingBluntify& graph)
 {
-	std::vector<bool> leftHandled;
-	std::vector<bool> rightHandled;
-	leftHandled.resize(graph.items.size(), false);
-	rightHandled.resize(graph.items.size(), false);
-	size_t totalCliques = 0;
-	for (size_t i = 0; i < graph.items.size(); i++)
+	auto cliques = getCliques(graph);
+	for (size_t i = 0; i < cliques.size(); i++)
 	{
-		if (!leftHandled[i])
+		for (auto left : cliques[i].left)
 		{
-			auto component = getComponent(graph, i, false);
-			auto cliques = solveCliques(component, graph);
-			for (auto clique : cliques)
-			{
-				for (auto node : clique.left)
-				{
-					assert(!leftHandled[node]);
-					assert(node < graph.items.size());
-					graph.items[node].leftCliques.push_unique(totalCliques);
-				}
-				for (auto node : clique.right)
-				{
-					assert(!rightHandled[node]);
-					assert(node < graph.items.size());
-					graph.items[node].rightCliques.push_unique(totalCliques);
-				}
-				totalCliques++;
-			}
-			for (auto clique : cliques)
-			{
-				for (auto node : clique.left)
-				{
-					leftHandled[node] = true;
-				}
-				for (auto node : clique.right)
-				{
-					rightHandled[node] = true;
-				}
-			}
+			graph.items[left].cliques.push_unique(i, NodeEnd::End);
 		}
-		if (!rightHandled[i])
+		for (auto right : cliques[i].right)
 		{
-			auto component = getComponent(graph, i, true);
-			auto cliques = solveCliques(component, graph);
-			for (auto clique : cliques)
-			{
-				for (auto node : clique.left)
-				{
-					assert(!leftHandled[node]);
-					assert(node < graph.items.size());
-					graph.items[node].leftCliques.push_unique(totalCliques);
-				}
-				for (auto node : clique.right)
-				{
-					assert(!rightHandled[node]);
-					assert(node < graph.items.size());
-					graph.items[node].rightCliques.push_unique(totalCliques);
-				}
-				totalCliques++;
-			}
-			for (auto clique : cliques)
-			{
-				for (auto node : clique.left)
-				{
-					leftHandled[node] = true;
-				}
-				for (auto node : clique.right)
-				{
-					rightHandled[node] = true;
-				}
-			}
+			graph.items[right].cliques.push_unique(i, NodeEnd::Start);
 		}
 	}
 }
@@ -370,37 +457,41 @@ BluntedCliques getBluntedCliques(const GroupingBluntify& grouping)
 	NodeType size = 0;
 	for (size_t i = 0; i < grouping.items.size(); i++)
 	{
-		for (size_t j = 0; j < grouping.items[i].leftCliques.size(); j++)
+		for (size_t j = 0; j < grouping.items[{i, NodeEnd::Start}].cliques.size(); j++)
 		{
-			size = std::max(size, grouping.items[i].leftCliques[j] + 1);
+			size = std::max(size, grouping.items[{i, NodeEnd::Start}].cliques[j].first + 1);
 		}
-		for (size_t j = 0; j < grouping.items[i].rightCliques.size(); j++)
+		for (size_t j = 0; j < grouping.items[{i, NodeEnd::End}].cliques.size(); j++)
 		{
-			size = std::max(size, grouping.items[i].rightCliques[j] + 1);
+			size = std::max(size, grouping.items[{i, NodeEnd::End}].cliques[j].first + 1);
 		}
 	}
 	result.originalNodeAndOffset.resize(size, {0, -1, false});
 	for (size_t i = 0; i < grouping.items.size(); i++)
 	{
-		for (size_t j = 0; j < grouping.items[i].rightCliques.size(); j++)
+		for (size_t j = 0; j < grouping.items[{i, NodeEnd::End}].cliques.size(); j++)
 		{
-			for (size_t k = 0; k < grouping.items[i].leftCliques.size(); k++)
-			{
-				result.edges.emplace_back(grouping.items[i].rightCliques[j], grouping.items[i].leftCliques[k]);
+			for (size_t k = 0; k < grouping.items[{i, NodeEnd::Start}].cliques.size(); k++)
+			{ //order doesn't matter (symmetric)
+				result.edges.emplace_back(grouping.items[{i, NodeEnd::Start}].cliques[k], grouping.items[{i, NodeEnd::End}].cliques[j]);
 			}
 		}
-		for (size_t j = 0; j < grouping.items[i].rightCliques.size(); j++)
-		{
-			auto clique = grouping.items[i].rightCliques[j];
-			assert(clique < size);
-			result.originalNodeAndOffset[clique] = grouping.items[i].original;
+		for (size_t j = 0; j < grouping.items[{i, NodeEnd::Start}].cliques.size(); j++)
+		{ //todo check
+			auto clique = grouping.items[{i, NodeEnd::Start}].cliques[j];
+			assert(clique.first < size);
+			result.originalNodeAndOffset[clique.first] = grouping.originals[i];
+			if (result.originalNodeAndOffset[clique.first].reverse) result.originalNodeAndOffset[clique.first].offset += 1;
+			if (clique.second == NodeEnd::Start) result.originalNodeAndOffset[clique.first].reverse = !grouping.originals[i].reverse;
 		}
-		for (size_t j = 0; j < grouping.items[i].leftCliques.size(); j++)
-		{
-			auto clique = grouping.items[i].leftCliques[j];
-			assert(clique < size);
-			result.originalNodeAndOffset[clique] = grouping.items[i].original;
-			result.originalNodeAndOffset[clique].offset += grouping.items[i].original.reverse ? -1 : 1;
+		for (size_t j = 0; j < grouping.items[{i, NodeEnd::End}].cliques.size(); j++)
+		{ //todo check
+			auto clique = grouping.items[{i, NodeEnd::End}].cliques[j];
+			assert(clique.first < size);
+			result.originalNodeAndOffset[clique.first] = grouping.originals[i];
+			if (!result.originalNodeAndOffset[clique.first].reverse) result.originalNodeAndOffset[clique.first].offset += 1;
+			if (clique.second == NodeEnd::End) result.originalNodeAndOffset[clique.first].reverse = !grouping.originals[i].reverse;
+			// result.originalNodeAndOffset[clique.first].offset += grouping.originals[i].reverse ? -1 : 1;
 		}
 	}
 #ifndef NDEBUG
@@ -415,7 +506,8 @@ BluntedCliques getBluntedCliques(const GroupingBluntify& grouping)
 GroupingBluntify loadUnbluntGFA(std::string filename)
 {
 	size_t resultSize = 0;
-	std::unordered_map<int, std::tuple<NodeType, NodeType, NodeType>> originalNodePos;
+	std::unordered_map<int, NodeType> originalNodeStart;
+	std::unordered_map<int, NodeType> originalNodeEnd;
 	GroupingBluntify result;
 	{
 		std::ifstream file { filename };
@@ -430,7 +522,7 @@ GroupingBluntify loadUnbluntGFA(std::string filename)
 				int fromid, toid;
 				line >> dummy >> fromid >> fromstart >> toid >> toend >> overlap;
 				assert(fromstart == "+" || fromstart == "-");
-				assert(toend == "+" || fromstart == "-");
+				assert(toend == "+" || toend == "-");
 				int overlapint = std::stoi(overlap.substr(0, overlap.size()-1));
 				if (result.overlap == -1) result.overlap = overlapint;
 				assert(result.overlap == overlapint);
@@ -452,17 +544,15 @@ GroupingBluntify loadUnbluntGFA(std::string filename)
 				line >> dummy >> id >> seq;
 				assert(seq.size() > result.overlap);
 				auto nodeSize = seq.size() - result.overlap;
-				std::tuple<NodeType, NodeType, NodeType> posInfo;
-				std::get<0>(posInfo) = resultSize;
-				std::get<1>(posInfo) = resultSize + nodeSize;
-				resultSize += nodeSize * 2;
-				std::get<2>(posInfo) = resultSize - 1;
-				originalNodePos[id] = posInfo;
+				originalNodeStart[id] = resultSize;
+				originalNodeEnd[id] = resultSize + nodeSize - 1;
+				resultSize += nodeSize;
 			}
 		}
 	}
 	assert(resultSize < std::numeric_limits<NodeType>::max());
 	result.items.resize(resultSize);
+	result.originals.resize(resultSize);
 	{
 		size_t pos = 0;
 		std::ifstream file { filename };
@@ -477,33 +567,19 @@ GroupingBluntify loadUnbluntGFA(std::string filename)
 				int id;
 				line >> dummy >> id >> seq;
 				assert(pos < result.items.size());
-				result.items[pos].original.id = id;
-				result.items[pos].original.offset = 0;
-				result.items[pos].original.reverse = false;
+				result.originals[pos].id = id;
+				result.originals[pos].offset = 0;
+				result.originals[pos].reverse = false;
 				assert(seq.size() > result.overlap);
 				auto nodeSize = seq.size() - result.overlap;
-				assert(pos + nodeSize < result.items.size());
+				assert(pos + nodeSize <= result.items.size());
 				for (size_t i = 1; i < nodeSize; i++)
 				{
-					result.items[pos+i-1].leftEdges.push_unique(pos+i);
-					result.items[pos+i].rightEdges.push_unique(pos+i-1);
-					result.items[pos+i].original.id = id;
-					result.items[pos+i].original.offset = i;
-					result.items[pos+i].original.reverse = false;
-				}
-				pos += nodeSize;
-				assert(pos < result.items.size());
-				result.items[pos].original.id = id;
-				result.items[pos].original.offset = seq.size() - 1;
-				result.items[pos].original.reverse = true;
-				assert(pos + nodeSize < result.items.size());
-				for (size_t i = 1; i < nodeSize; i++)
-				{
-					result.items[pos+i-1].leftEdges.push_unique(pos+i);
-					result.items[pos+i].rightEdges.push_unique(pos+i-1);
-					result.items[pos+i].original.id = id;
-					result.items[pos+i].original.offset = seq.size() - 1 - i;
-					result.items[pos+i].original.reverse = true;
+					result.items[{pos+i-1, NodeEnd::End}].edges.push_unique(pos+i, NodeEnd::Start);
+					result.items[{pos+i, NodeEnd::Start}].edges.push_unique(pos+i-1, NodeEnd::End);
+					result.originals[pos+i].id = id;
+					result.originals[pos+i].offset = i;
+					result.originals[pos+i].reverse = false;
 				}
 				pos += nodeSize;
 			}
@@ -514,30 +590,20 @@ GroupingBluntify loadUnbluntGFA(std::string filename)
 				line >> dummy >> fromid >> fromstart >> toid >> toend >> overlap;
 				assert(fromstart == "+" || fromstart == "-");
 				assert(toend == "+" || toend == "-");
-				auto frominfo = originalNodePos[fromid];
-				auto toinfo = originalNodePos[toid];
-				auto start1 = std::get<1>(frominfo) - 1;
-				auto end1 = std::get<0>(toinfo);
-				auto start2 = std::get<2>(toinfo);
-				auto end2 = std::get<1>(frominfo);
+				NodePos start { originalNodeEnd[fromid], NodeEnd::End };
+				NodePos end { originalNodeStart[toid], NodeEnd::Start };
 				if (fromstart == "-")
 				{
-					start1 = std::get<2>(frominfo);
-					end2 = std::get<0>(frominfo);
+					start = { originalNodeStart[fromid], NodeEnd::Start };
 				}
 				if (toend == "-")
 				{
-					end1 = std::get<1>(toinfo);
-					start2 = std::get<1>(toinfo) - 1;
+					end = { originalNodeEnd[toid], NodeEnd::End };
 				}
-				assert(start1 < result.items.size());
-				assert(start2 < result.items.size());
-				assert(end1 < result.items.size());
-				assert(end2 < result.items.size());
-				result.items[start1].leftEdges.push_unique(end1);
-				result.items[start2].leftEdges.push_unique(end2);
-				result.items[end1].rightEdges.push_unique(start1);
-				result.items[end2].rightEdges.push_unique(start2);
+				assert(start.first < result.items.size());
+				assert(end.first < result.items.size());
+				result.items[start].edges.push_unique(end);
+				result.items[end].edges.push_unique(start);
 			}
 		}
 		assert(pos == resultSize);
@@ -547,72 +613,9 @@ GroupingBluntify loadUnbluntGFA(std::string filename)
 	return result;
 }
 
-class DoublestrandedResult
+void writeResultGfa(const GroupingBluntify& graph, std::string originalGraph, std::string filename)
 {
-public:
-	std::vector<std::pair<int, int>> nodes;
-	std::vector<std::tuple<NodeType, bool, NodeType, bool>> edges;
-};
-
-DoublestrandedResult dontMergeReverses(const GroupingBluntify& graph)
-{
-	DoublestrandedResult result;
-	for (size_t i = 0; i < graph.items.size(); i++)
-	{
-		result.nodes.emplace_back(graph.items[i].original.id, graph.items[i].original.offset);
-		for (size_t j = 0; j < graph.items[i].leftEdges.size(); j++)
-		{
-			auto target = graph.items[i].leftEdges[j];
-			result.edges.emplace_back(i, true, target, true);
-		}
-	}
-	return result;
-}
-
-DoublestrandedResult mergeReverses(const GroupingBluntify& graph)
-{
-	std::map<OriginalPosition, std::set<OriginalPosition>> edges;
-	std::map<std::pair<int, int>, NodeType> resultPositions;
-	DoublestrandedResult result;
-	for (size_t i = 0; i < graph.items.size(); i++)
-	{
-		for (size_t j = 0; j < graph.items[i].leftEdges.size(); j++)
-		{
-			auto from = graph.items[i].original;
-			auto to = graph.items[graph.items[i].leftEdges[j]].original;
-			if (from < to)
-			{
-				std::swap(from, to);
-				from.reverse = !from.reverse;
-				to.reverse = !to.reverse;
-			}
-			edges[from].insert(to);
-		}
-		auto resultPosTuple = std::make_pair(graph.items[i].original.id, graph.items[i].original.offset);
-		if (resultPositions.count(resultPosTuple) == 0)
-		{
-			resultPositions[resultPosTuple] = result.nodes.size();
-			result.nodes.emplace_back(resultPosTuple);
-		}
-	}
-	assert(result.nodes.size() == resultPositions.size());
-	result.nodes.shrink_to_fit();
-	for (auto pair : edges)
-	{
-		auto fwpostuple = pair.first;
-		auto resultpos = resultPositions[std::make_pair(fwpostuple.id, fwpostuple.offset)];
-		for (auto target : pair.second)
-		{
-			auto targetpostuple = std::make_pair(target.id, target.offset);
-			result.edges.emplace_back(resultpos, !fwpostuple.reverse, resultPositions[targetpostuple], !target.reverse);
-		}
-	}
-	result.edges.shrink_to_fit();
-	return result;
-}
-
-void writeResultGfa(const DoublestrandedResult& graph, std::string originalGraph, std::string filename)
-{
+	assert(graph.overlap == 0);
 	std::unordered_map<int, std::string> originalSequences;
 	{
 		std::ifstream file { originalGraph };
@@ -632,18 +635,45 @@ void writeResultGfa(const DoublestrandedResult& graph, std::string originalGraph
 	}
 	{
 		std::ofstream file { filename };
-		for (size_t i = 0; i < graph.nodes.size(); i++)
+		for (size_t i = 0; i < graph.items.size(); i++)
 		{
-			auto node = graph.nodes[i].first;
-			auto pos = graph.nodes[i].second;
+			auto node = graph.originals[i].id;
+			auto pos = graph.originals[i].offset;
 			assert(originalSequences.count(node) == 1);
 			assert(originalSequences[node].size() > pos);
 			char seq = originalSequences[node][pos];
+			if (graph.originals[i].reverse)
+			{
+				switch(seq)
+				{
+					case 'A':
+						seq = 'T';
+						break;
+					case 'T':
+						seq = 'A';
+						break;
+					case 'C':
+						seq = 'G';
+						break;
+					case 'G':
+						seq = 'C';
+						break;
+					default:
+						assert(false);
+						std::abort();
+				}
+			}
 			file << "S\t" << (i + 1) << "\t" << seq << std::endl;
-		}
-		for (auto edge : graph.edges)
-		{
-			file << "L\t" << (std::get<0>(edge) + 1) << "\t" << (std::get<1>(edge) ? "+" : "-") << "\t" << (std::get<2>(edge) + 1) << "\t" << (std::get<3>(edge) ? "+" : "-") << "\t0M" << std::endl;
+			auto neighbors = graph.neighbors({i, NodeEnd::End});
+			for (auto neighbor : neighbors)
+			{
+				file << "L\t" << (i+1) << "\t" << "+" << "\t" << (neighbor.first + 1) << "\t" << (neighbor.second == NodeEnd::End ? "-" : "+") << "\t0M" << std::endl;
+			}
+			neighbors = graph.neighbors({i, NodeEnd::Start});
+			for (auto neighbor : neighbors)
+			{
+				file << "L\t" << (i+1) << "\t" << "-" << "\t" << (neighbor.first + 1) << "\t" << (neighbor.second == NodeEnd::End ? "-" : "+") << "\t0M" << std::endl;
+			}
 		}
 	}
 }
@@ -652,11 +682,16 @@ void printGraph(const GroupingBluntify& graph)
 {
 	for (size_t i = 0; i < graph.items.size(); i++)
 	{
-		std::cerr << i << ":" << graph.items[i].original.id << "," << graph.items[i].original.offset << (graph.items[i].original.reverse ? "-" : "+");
+		std::cerr << i << ":" << graph.originals[i].id << "," << graph.originals[i].offset << (graph.originals[i].reverse ? "-" : "+");
 		std::cerr << ":";
-		for (size_t j = 0; j < graph.items[i].leftEdges.size(); j++)
+		for (size_t j = 0; j < graph.items[{i, NodeEnd::End}].edges.size(); j++)
 		{
-			std::cerr << graph.items[i].leftEdges[j] << ",";
+			std::cerr << graph.items[{i, NodeEnd::End}].edges[j].first << (graph.items[{i, NodeEnd::End}].edges[j].second == NodeEnd::Start ? "+" : "-") << ",";
+		}
+		std::cerr << ":";
+		for (size_t j = 0; j < graph.items[{i, NodeEnd::Start}].edges.size(); j++)
+		{
+			std::cerr << graph.items[{i, NodeEnd::Start}].edges[j].first << (graph.items[{i, NodeEnd::Start}].edges[j].second == NodeEnd::Start ? "+" : "-") << ",";
 		}
 		std::cerr << std::endl;
 	}
@@ -666,23 +701,23 @@ void verifyGraph(const GroupingBluntify& graph)
 {
 	for (size_t i = 0; i < graph.items.size(); i++)
 	{
-		for (size_t j = 0; j < graph.items[i].leftEdges.size(); j++)
+		for (size_t j = 0; j < graph.items[{i, NodeEnd::Start}].edges.size(); j++)
 		{
-			auto target = graph.items[i].leftEdges[j];
+			auto target = graph.items[{i, NodeEnd::Start}].edges[j];
 			bool found = false;
-			for (size_t k = 0; k < graph.items[target].rightEdges.size(); k++)
+			for (size_t k = 0; k < graph.items[target].edges.size(); k++)
 			{
-				if (graph.items[target].rightEdges[k] == i) found = true;
+				if (graph.items[target].edges[k].first == i && graph.items[target].edges[k].second == NodeEnd::Start) found = true;
 			}
 			assert(found);
 		}
-		for (size_t j = 0; j < graph.items[i].rightEdges.size(); j++)
+		for (size_t j = 0; j < graph.items[{i, NodeEnd::End}].edges.size(); j++)
 		{
-			auto target = graph.items[i].rightEdges[j];
+			auto target = graph.items[{i, NodeEnd::End}].edges[j];
 			bool found = false;
-			for (size_t k = 0; k < graph.items[target].leftEdges.size(); k++)
+			for (size_t k = 0; k < graph.items[target].edges.size(); k++)
 			{
-				if (graph.items[target].leftEdges[k] == i) found = true;
+				if (graph.items[target].edges[k].first == i && graph.items[target].edges[k].second == NodeEnd::End) found = true;
 			}
 			assert(found);
 		}
@@ -695,14 +730,14 @@ void printCliques(const GroupingBluntify& graph)
 	for (size_t i = 0; i < graph.items.size(); i++)
 	{
 		std::cerr << i << ":";
-		for (size_t j = 0; j < graph.items[i].leftCliques.size(); j++)
+		for (size_t j = 0; j < graph.items[{i, NodeEnd::End}].cliques.size(); j++)
 		{
-			std::cerr << graph.items[i].leftCliques[j] << ",";
+			std::cerr << graph.items[{i, NodeEnd::End}].cliques[j].first << (graph.items[{i, NodeEnd::End}].cliques[j].second == NodeEnd::Start ? "+" : "-") << ",";
 		}
 		std::cerr << ":";
-		for (size_t j = 0; j < graph.items[i].rightCliques.size(); j++)
+		for (size_t j = 0; j < graph.items[{i, NodeEnd::Start}].cliques.size(); j++)
 		{
-			std::cerr << graph.items[i].rightCliques[j] << ",";
+			std::cerr << graph.items[{i, NodeEnd::Start}].cliques[j].first << (graph.items[{i, NodeEnd::Start}].cliques[j].second == NodeEnd::Start ? "+" : "-") << ",";
 		}
 		std::cerr << std::endl;
 	}
@@ -724,6 +759,5 @@ int main(int argc, char** argv)
 	std::cerr << "overlap " << graph.overlap << " size " << graph.items.size() << std::endl;
 	// printGraph(graph);
 	verifyGraph(graph);
-	auto doublestranded = mergeReverses(graph);
-	writeResultGfa(doublestranded, argv[1], argv[2]);
+	writeResultGfa(graph, argv[1], argv[2]);
 }
