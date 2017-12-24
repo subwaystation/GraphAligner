@@ -33,6 +33,22 @@ public:
 		first.resize(size, val);
 		second.resize(size, val);
 	}
+	template <typename... Args>
+	void emplace_back(Args... args)
+	{
+		first.emplace_back(args...);
+		second.emplace_back(args...);
+	}
+	void shrink_to_fit()
+	{
+		first.shrink_to_fit();
+		second.shrink_to_fit();
+	}
+	void reserve(size_t size)
+	{
+		first.reserve(size);
+		second.reserve(size);
+	}
 	T& operator[](NodePos pos)
 	{
 		if (pos.second == NodeEnd::End) return second[pos.first];
@@ -127,6 +143,7 @@ class OriginalPosition
 public:
 	int id;
 	int offset;
+	int size;
 	bool reverse;
 	bool operator==(const OriginalPosition& other) const
 	{
@@ -141,8 +158,8 @@ public:
 class EdgeGroupingItem
 {
 public:
-	SizeArray<NodePos, 4> edges;
-	SizeArray<NodePos, 4> cliques;
+	SizeArray<NodePos, 16> edges;
+	SizeArray<NodePos, 16> cliques;
 };
 
 class GroupingBluntify
@@ -152,19 +169,19 @@ public:
 	int overlap;
 	PosVector<EdgeGroupingItem> items;
 	std::vector<OriginalPosition> originals;
-	SizeArray<NodePos, 4>& neighbors(NodeType pos, NodeEnd side)
+	SizeArray<NodePos, 16>& neighbors(NodeType pos, NodeEnd side)
 	{
 		return items[{pos, side}].edges;
 	}
-	SizeArray<NodePos, 4>& neighbors(NodePos pos)
+	SizeArray<NodePos, 16>& neighbors(NodePos pos)
 	{
 		return items[pos].edges;
 	}
-	const SizeArray<NodePos, 4>& neighbors(NodeType pos, NodeEnd side) const
+	const SizeArray<NodePos, 16>& neighbors(NodeType pos, NodeEnd side) const
 	{
 		return items[{pos, side}].edges;
 	}
-	const SizeArray<NodePos, 4>& neighbors(NodePos pos) const
+	const SizeArray<NodePos, 16>& neighbors(NodePos pos) const
 	{
 		return items[pos].edges;
 	}
@@ -214,9 +231,10 @@ void partitionRec(NodePos pos, bool side, PosVector<bool>& partitioned, PosVecto
 	partitioned[pos] = side;
 	for (auto neighbor : graph.neighbors(pos))
 	{
-		if (handled[neighbor] && neighbor != pos)
+		if (neighbor == pos) continue;
+		if (handled[neighbor])
 		{
-			assert(partitioned[neighbor] != side);
+			// assert(partitioned[neighbor] != side);
 		}
 		else
 		{
@@ -375,7 +393,9 @@ std::vector<NodeClique> solveCliques(const std::pair<std::vector<NodePos>, std::
 			else
 			{
 				assert(equalToLeft[i] < i);
-				result[equalToLeft[i]].left.insert(component.first[i]);
+				assert(equalToLeft[i] < leftInClique.size());
+				assert(leftInClique[equalToLeft[i]] < result.size());
+				result[leftInClique[equalToLeft[i]]].left.insert(component.first[i]);
 				leftInClique[i] = leftInClique[equalToLeft[i]];
 			}
 		}
@@ -400,7 +420,9 @@ std::vector<NodeClique> solveCliques(const std::pair<std::vector<NodePos>, std::
 			else
 			{
 				assert(equalToRight[i] < i);
-				result[equalToRight[i]].right.insert(component.second[i]);
+				assert(equalToRight[i] < rightInClique.size());
+				assert(rightInClique[equalToRight[i]] < result.size());
+				result[rightInClique[equalToRight[i]]].right.insert(component.second[i]);
 				rightInClique[i] = rightInClique[equalToRight[i]];
 			}
 		}
@@ -454,50 +476,84 @@ void fillEdgeCliques(GroupingBluntify& graph)
 BluntedCliques getBluntedCliques(const GroupingBluntify& grouping)
 {
 	BluntedCliques result;
-	NodeType size = 0;
+	NodeType numCliques = 0;
+	NodeType numExtras = 0;
 	for (size_t i = 0; i < grouping.items.size(); i++)
 	{
+		if (grouping.originals[i].size > grouping.overlap + 1)
+		{
+			numExtras += 1;
+		}
+		else
+		{
+			assert(grouping.originals[i].size == grouping.overlap + 1);
+		}
 		for (size_t j = 0; j < grouping.items[{i, NodeEnd::Start}].cliques.size(); j++)
 		{
-			size = std::max(size, grouping.items[{i, NodeEnd::Start}].cliques[j].first + 1);
+			numCliques = std::max(numCliques, grouping.items[{i, NodeEnd::Start}].cliques[j].first + 1);
 		}
 		for (size_t j = 0; j < grouping.items[{i, NodeEnd::End}].cliques.size(); j++)
 		{
-			size = std::max(size, grouping.items[{i, NodeEnd::End}].cliques[j].first + 1);
+			numCliques = std::max(numCliques, grouping.items[{i, NodeEnd::End}].cliques[j].first + 1);
 		}
 	}
-	result.originalNodeAndOffset.resize(size, {0, -1, false});
+	result.originalNodeAndOffset.resize(numCliques + numExtras, {0, -1, 0, false});
+	numExtras = 0;
 	for (size_t i = 0; i < grouping.items.size(); i++)
 	{
-		for (size_t j = 0; j < grouping.items[{i, NodeEnd::End}].cliques.size(); j++)
+		if (grouping.originals[i].size > grouping.overlap + 1)
 		{
-			for (size_t k = 0; k < grouping.items[{i, NodeEnd::Start}].cliques.size(); k++)
-			{ //order doesn't matter (symmetric)
-				result.edges.emplace_back(grouping.items[{i, NodeEnd::Start}].cliques[k], grouping.items[{i, NodeEnd::End}].cliques[j]);
+			assert(!grouping.originals[i].reverse);
+			result.originalNodeAndOffset[numCliques + numExtras] = grouping.originals[i];
+			result.originalNodeAndOffset[numCliques + numExtras].size -= 2;
+			result.originalNodeAndOffset[numCliques + numExtras].offset += 1;
+			for (size_t j = 0; j < grouping.items[{i, NodeEnd::End}].cliques.size(); j++)
+			{
+				result.edges.emplace_back(grouping.items[{i, NodeEnd::End}].cliques[j], NodePos {numCliques + numExtras, NodeEnd::End});
 			}
+			for (size_t j = 0; j < grouping.items[{i, NodeEnd::Start}].cliques.size(); j++)
+			{
+				result.edges.emplace_back(grouping.items[{i, NodeEnd::Start}].cliques[j], NodePos {numCliques + numExtras, NodeEnd::Start});
+			}
+			numExtras++;
 		}
-		for (size_t j = 0; j < grouping.items[{i, NodeEnd::Start}].cliques.size(); j++)
-		{ //todo check
-			auto clique = grouping.items[{i, NodeEnd::Start}].cliques[j];
-			assert(clique.first < size);
-			result.originalNodeAndOffset[clique.first] = grouping.originals[i];
-			if (result.originalNodeAndOffset[clique.first].reverse) result.originalNodeAndOffset[clique.first].offset += 1;
-			if (clique.second == NodeEnd::Start) result.originalNodeAndOffset[clique.first].reverse = !grouping.originals[i].reverse;
-		}
-		for (size_t j = 0; j < grouping.items[{i, NodeEnd::End}].cliques.size(); j++)
-		{ //todo check
-			auto clique = grouping.items[{i, NodeEnd::End}].cliques[j];
-			assert(clique.first < size);
-			result.originalNodeAndOffset[clique.first] = grouping.originals[i];
-			if (!result.originalNodeAndOffset[clique.first].reverse) result.originalNodeAndOffset[clique.first].offset += 1;
-			if (clique.second == NodeEnd::End) result.originalNodeAndOffset[clique.first].reverse = !grouping.originals[i].reverse;
-			// result.originalNodeAndOffset[clique.first].offset += grouping.originals[i].reverse ? -1 : 1;
+		else
+		{
+			assert(grouping.originals[i].size == grouping.overlap + 1);
+			for (size_t j = 0; j < grouping.items[{i, NodeEnd::End}].cliques.size(); j++)
+			{
+				for (size_t k = 0; k < grouping.items[{i, NodeEnd::Start}].cliques.size(); k++)
+				{ //order doesn't matter (symmetric)
+					result.edges.emplace_back(grouping.items[{i, NodeEnd::Start}].cliques[k], grouping.items[{i, NodeEnd::End}].cliques[j]);
+				}
+			}
+			for (size_t j = 0; j < grouping.items[{i, NodeEnd::Start}].cliques.size(); j++)
+			{ //todo check
+				auto clique = grouping.items[{i, NodeEnd::Start}].cliques[j];
+				assert(clique.first < result.originalNodeAndOffset.size());
+				result.originalNodeAndOffset[clique.first] = grouping.originals[i];
+				result.originalNodeAndOffset[clique.first].size--;
+				if (result.originalNodeAndOffset[clique.first].reverse) result.originalNodeAndOffset[clique.first].offset += 1;
+				if (clique.second == NodeEnd::Start) result.originalNodeAndOffset[clique.first].reverse = !grouping.originals[i].reverse;
+			}
+			for (size_t j = 0; j < grouping.items[{i, NodeEnd::End}].cliques.size(); j++)
+			{ //todo check
+				auto clique = grouping.items[{i, NodeEnd::End}].cliques[j];
+				assert(clique.first < result.originalNodeAndOffset.size());
+				result.originalNodeAndOffset[clique.first] = grouping.originals[i];
+				result.originalNodeAndOffset[clique.first].size--;
+				if (!result.originalNodeAndOffset[clique.first].reverse) result.originalNodeAndOffset[clique.first].offset += 1;
+				if (clique.second == NodeEnd::End) result.originalNodeAndOffset[clique.first].reverse = !grouping.originals[i].reverse;
+				// result.originalNodeAndOffset[clique.first].offset += grouping.originals[i].reverse ? -1 : 1;
+			}
 		}
 	}
 #ifndef NDEBUG
 	for (size_t i = 0; i < result.originalNodeAndOffset.size(); i++)
 	{
 		assert(result.originalNodeAndOffset[i].offset != -1);
+		assert(result.originalNodeAndOffset[i].size != 0);
+		if (result.originalNodeAndOffset[i].size > grouping.overlap) assert(!result.originalNodeAndOffset[i].reverse);
 	}
 #endif
 	return result;
@@ -543,10 +599,24 @@ GroupingBluntify loadUnbluntGFA(std::string filename)
 				int id;
 				line >> dummy >> id >> seq;
 				assert(seq.size() > result.overlap);
-				auto nodeSize = seq.size() - result.overlap;
 				originalNodeStart[id] = resultSize;
-				originalNodeEnd[id] = resultSize + nodeSize - 1;
-				resultSize += nodeSize;
+				originalNodeEnd[id] = resultSize;
+				if (seq.size() == result.overlap + 2)
+				{
+					originalNodeEnd[id] = resultSize + 1;
+					resultSize += 2;
+				}
+				else if (seq.size() > result.overlap + 2)
+				{
+					originalNodeEnd[id] = resultSize + 1;
+					resultSize += 3;
+				}
+				else
+				{
+					assert(seq.size() == result.overlap + 1);
+					originalNodeEnd[id] = resultSize;
+					resultSize += 1;
+				}
 			}
 		}
 	}
@@ -570,18 +640,41 @@ GroupingBluntify loadUnbluntGFA(std::string filename)
 				result.originals[pos].id = id;
 				result.originals[pos].offset = 0;
 				result.originals[pos].reverse = false;
-				assert(seq.size() > result.overlap);
-				auto nodeSize = seq.size() - result.overlap;
-				assert(pos + nodeSize <= result.items.size());
-				for (size_t i = 1; i < nodeSize; i++)
+				result.originals[pos].size = seq.size();
+				if (seq.size() == result.overlap + 2)
 				{
-					result.items[{pos+i-1, NodeEnd::End}].edges.push_unique(pos+i, NodeEnd::Start);
-					result.items[{pos+i, NodeEnd::Start}].edges.push_unique(pos+i-1, NodeEnd::End);
-					result.originals[pos+i].id = id;
-					result.originals[pos+i].offset = i;
-					result.originals[pos+i].reverse = false;
+					result.originals[pos].size = result.overlap+1;
+					result.originals[pos+1].id = id;
+					result.originals[pos+1].offset = 1;
+					result.originals[pos+1].reverse = false;
+					result.originals[pos+1].size = result.overlap + 1;
+					result.items[{pos, NodeEnd::End}].edges.push_unique({pos+1, NodeEnd::Start});
+					result.items[{pos+1, NodeEnd::Start}].edges.push_unique({pos, NodeEnd::End});
+					pos += 2;
 				}
-				pos += nodeSize;
+				else if (seq.size() > result.overlap + 2)
+				{
+					result.originals[pos].size = result.overlap + 1;
+					result.originals[pos+1].id = id;
+					result.originals[pos+1].offset = seq.size() - (result.overlap + 1);
+					result.originals[pos+1].reverse = false;
+					result.originals[pos+1].size = result.overlap + 1;
+					result.originals[pos+2].id = id;
+					result.originals[pos+2].offset = 1;
+					result.originals[pos+2].reverse = false;
+					result.originals[pos+2].size = seq.size() - 2;
+					result.items[{pos, NodeEnd::End}].edges.push_unique({pos+2, NodeEnd::Start});
+					result.items[{pos+2, NodeEnd::Start}].edges.push_unique({pos, NodeEnd::End});
+					result.items[{pos+2, NodeEnd::End}].edges.push_unique({pos+1, NodeEnd::Start});
+					result.items[{pos+1, NodeEnd::Start}].edges.push_unique({pos+2, NodeEnd::End});
+					pos += 3;
+				}
+				else
+				{
+					assert(seq.size() == result.overlap + 1);
+					pos += 1;
+				}
+				assert(seq.size() > result.overlap);
 			}
 			if (linestr[0] == 'L')
 			{
@@ -639,24 +732,26 @@ void writeResultGfa(const GroupingBluntify& graph, std::string originalGraph, st
 		{
 			auto node = graph.originals[i].id;
 			auto pos = graph.originals[i].offset;
+			auto size = graph.originals[i].size;
 			assert(originalSequences.count(node) == 1);
 			assert(originalSequences[node].size() > pos);
-			char seq = originalSequences[node][pos];
+			std::string seq = originalSequences[node].substr(pos, size);
 			if (graph.originals[i].reverse)
 			{
-				switch(seq)
+				assert(seq.size() == 1);
+				switch(seq[0])
 				{
 					case 'A':
-						seq = 'T';
+						seq[0] = 'T';
 						break;
 					case 'T':
-						seq = 'A';
+						seq[0] = 'A';
 						break;
 					case 'C':
-						seq = 'G';
+						seq[0] = 'G';
 						break;
 					case 'G':
-						seq = 'C';
+						seq[0] = 'C';
 						break;
 					default:
 						assert(false);
