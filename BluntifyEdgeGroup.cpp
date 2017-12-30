@@ -14,6 +14,10 @@
 typedef uint32_t NodeType;
 enum NodeEnd {End, Start};
 typedef std::pair<NodeType, NodeEnd> NodePos;
+constexpr int SizeArraySize = 4;
+
+int brokeNodeId;
+int brokeNodeOffset;
 
 template <typename T>
 class PosVector
@@ -104,23 +108,13 @@ public:
 	SizeArray() : elems(0) {};
 	void push_back(T val)
 	{
+		if (elems == N)
+		{
+			std::cerr << "id: " << brokeNodeId << " offset: " << brokeNodeOffset << std::endl;
+		}
 		assert(elems < N);
 		(*this)[elems] = val;
 		elems++;
-	}
-	void push_unique(T val)
-	{
-		for (size_t i = 0; i < size(); i++)
-		{
-			if ((*this)[i] == val) return;
-		}
-		push_back(val);
-	}
-	template <typename... Args>
-	void push_unique(Args... args)
-	{
-		T val {args...};
-		push_unique(val);
 	}
 	size_t size() const
 	{
@@ -134,9 +128,79 @@ public:
 	{
 		return std::array<T, N>::begin() + elems;
 	}
+	void erase(typename std::array<T, N>::const_iterator first, typename std::array<T, N>::const_iterator last)
+	{
+		assert((last == end()));
+		elems = first - std::array<T, N>::begin();
+	}
+	void erase(typename std::array<T, N>::const_iterator pos)
+	{
+		assert((pos - (typename std::array<T, N>::iterator)std::array<T, N>::begin() < elems));
+		for (size_t i = pos - (typename std::array<T, N>::iterator)std::array<T, N>::begin(); i < elems-1; i++)
+		{
+			(*this)[i] = (*this)[i+1];
+		}
+		elems--;
+	}
 private:
 	char elems;
 };
+
+template <typename Container, typename T>
+void push_unique(Container& c, T val)
+{
+	for (auto item : c)
+	{
+		if (item == val) return;
+	}
+	c.push_back(val);
+}
+
+template <typename Container, typename T>
+void remove_unique(Container& c, T val)
+{
+	auto iter = c.begin();
+	while (iter != c.end())
+	{
+		if (*iter == val)
+		{
+			c.erase(iter);
+			return;
+		}
+	}
+	assert(false);
+}
+
+template <>
+void remove_unique(SizeArray<NodePos, SizeArraySize>& c, NodePos val)
+{
+	for (size_t i = 0; i < c.size(); i++)
+	{
+		if (c[i] == val)
+		{
+			c.erase(c.begin() + i);
+			return;
+		}
+	}
+	assert(false);
+}
+
+template <>
+void remove_unique(std::vector<NodePos>& c, NodePos val)
+{
+	for (size_t i = 0; i < c.size(); i++)
+	{
+		if (c[i] == val)
+		{
+			c.erase(c.begin() + i);
+			return;
+		}
+	}
+	assert(false);
+}
+
+using GroupingArray = std::vector<NodePos>;
+// using GroupingArray = SizeArray<NodePos, SizeArraySize>;
 
 class OriginalPosition
 {
@@ -158,8 +222,8 @@ public:
 class EdgeGroupingItem
 {
 public:
-	SizeArray<NodePos, 16> edges;
-	SizeArray<NodePos, 16> cliques;
+	GroupingArray edges;
+	GroupingArray cliques;
 };
 
 class GroupingBluntify
@@ -169,19 +233,29 @@ public:
 	int overlap;
 	PosVector<EdgeGroupingItem> items;
 	std::vector<OriginalPosition> originals;
-	SizeArray<NodePos, 16>& neighbors(NodeType pos, NodeEnd side)
+	size_t maxDegree() const
+	{
+		size_t result = 0;
+		for (size_t i = 0; i < items.size(); i++)
+		{
+			result = std::max(result, items[{i, NodeEnd::Start}].edges.size());
+			result = std::max(result, items[{i, NodeEnd::End}].edges.size());
+		}
+		return result;
+	}
+	GroupingArray& neighbors(NodeType pos, NodeEnd side)
 	{
 		return items[{pos, side}].edges;
 	}
-	SizeArray<NodePos, 16>& neighbors(NodePos pos)
+	GroupingArray& neighbors(NodePos pos)
 	{
 		return items[pos].edges;
 	}
-	const SizeArray<NodePos, 16>& neighbors(NodeType pos, NodeEnd side) const
+	const GroupingArray& neighbors(NodeType pos, NodeEnd side) const
 	{
 		return items[{pos, side}].edges;
 	}
-	const SizeArray<NodePos, 16>& neighbors(NodePos pos) const
+	const GroupingArray& neighbors(NodePos pos) const
 	{
 		return items[pos].edges;
 	}
@@ -201,6 +275,124 @@ public:
 	std::set<NodePos> right;
 };
 
+void verifyGraph(const GroupingBluntify& graph)
+{
+	for (size_t i = 0; i < graph.items.size(); i++)
+	{
+		for (size_t j = 0; j < graph.items[{i, NodeEnd::Start}].edges.size(); j++)
+		{
+			auto target = graph.items[{i, NodeEnd::Start}].edges[j];
+			bool found = false;
+			for (size_t k = 0; k < graph.items[target].edges.size(); k++)
+			{
+				if (graph.items[target].edges[k].first == i && graph.items[target].edges[k].second == NodeEnd::Start) found = true;
+			}
+			assert(found);
+		}
+		for (size_t j = 0; j < graph.items[{i, NodeEnd::End}].edges.size(); j++)
+		{
+			auto target = graph.items[{i, NodeEnd::End}].edges[j];
+			bool found = false;
+			for (size_t k = 0; k < graph.items[target].edges.size(); k++)
+			{
+				if (graph.items[target].edges[k].first == i && graph.items[target].edges[k].second == NodeEnd::End) found = true;
+			}
+			assert(found);
+		}
+	}
+}
+
+void splitLargeDegreeNodes(GroupingBluntify& graph, int maxDegree)
+{
+	verifyGraph(graph);
+	for (size_t node = 0; node < graph.items.size(); node++)
+	{
+		if (node == 47 || node == 14786)
+		{
+			int a = 1;
+		}
+		auto endDegree = graph.items[{node, NodeEnd::End}].edges.size();
+		if (endDegree > maxDegree)
+		{
+			int edgesPerNode = (endDegree + maxDegree - 1) / maxDegree;
+			assert(edgesPerNode <= maxDegree);
+			int extraNodes = (endDegree - 1) / edgesPerNode;
+			for (int j = 0; j < extraNodes; j++)
+			{
+				graph.items.emplace_back();
+				NodePos newnode { graph.items.size() - 1, NodeEnd::End };
+				int startedge = edgesPerNode * (j + 1);
+				int endedge = edgesPerNode * (j + 2);
+				for (int edge = startedge; edge < endedge && edge < graph.items[{node, NodeEnd::End}].edges.size(); edge++)
+				{
+					auto target = graph.items[{node, NodeEnd::End}].edges[edge];
+					if (target.first == 47 || target.first == 14786)
+					{
+						int a = 1;
+					}
+					push_unique(graph.items[newnode].edges, target);
+					push_unique(graph.items[target].edges, newnode);
+				}
+				NodePos newnodeStart = { graph.items.size() - 1, NodeEnd::Start };
+				for (int edge = 0; edge < graph.items[{node, NodeEnd::Start}].edges.size(); edge++)
+				{
+					auto target = graph.items[{node, NodeEnd::Start}].edges[edge];
+					if (target.first == 47 || target.first == 14786)
+					{
+						int a = 1;
+					}
+					push_unique(graph.items[newnodeStart].edges, target);
+					push_unique(graph.items[target].edges, newnodeStart);
+				}
+			}
+			for (int j = edgesPerNode; j < graph.items[{node, NodeEnd::End}].edges.size(); j++)
+			{
+				auto target = graph.items[{node, NodeEnd::End}].edges[j];
+				if (target.first == 47 || target.first == 14786)
+				{
+					int a = 1;
+				}
+				remove_unique(graph.items[target].edges, NodePos {node, NodeEnd::End});
+			}
+			graph.items[{node, NodeEnd::End}].edges.erase(graph.items[{node, NodeEnd::End}].edges.begin() + edgesPerNode, graph.items[{node, NodeEnd::End}].edges.end());
+			assert((graph.items[{node, NodeEnd::End}].edges.size() <= maxDegree));
+			assert((graph.items[{node, NodeEnd::End}].edges.size() == edgesPerNode));
+		}
+		auto startDegree = graph.items[{node, NodeEnd::Start}].edges.size();
+		if (startDegree > maxDegree)
+		{
+			int edgesPerNode = (startDegree + maxDegree - 1) / maxDegree;
+			assert(edgesPerNode <= maxDegree);
+			int extraNodes = (startDegree - 1) / edgesPerNode;
+			for (int j = 0; j < extraNodes; j++)
+			{
+				graph.items.emplace_back();
+				int startedge = edgesPerNode * (j + 1);
+				int endedge = edgesPerNode * (j + 2);
+				for (int edge = startedge; edge < endedge && edge < graph.items[{node, NodeEnd::Start}].edges.size(); edge++)
+				{
+					auto target = graph.items[{node, NodeEnd::Start}].edges[edge];
+					push_unique(graph.items[{graph.items.size() - 1, NodeEnd::Start}].edges, target);
+					push_unique(graph.items[target].edges, NodePos {graph.items.size() - 1, NodeEnd::Start});
+				}
+				for (int edge = 0; edge < graph.items[{node, NodeEnd::End}].edges.size(); edge++)
+				{
+					auto target = graph.items[{node, NodeEnd::End}].edges[edge];
+					push_unique(graph.items[{graph.items.size() - 1, NodeEnd::End}].edges, target);
+					push_unique(graph.items[target].edges, NodePos {graph.items.size() - 1, NodeEnd::End});
+				}
+			}
+			for (int j = edgesPerNode; j < graph.items[{node, NodeEnd::Start}].edges.size(); j++)
+			{
+				auto target = graph.items[{node, NodeEnd::Start}].edges[j];
+				remove_unique(graph.items[target].edges, NodePos {node, NodeEnd::Start});
+			}
+			graph.items[{node, NodeEnd::Start}].edges.erase(graph.items[{node, NodeEnd::Start}].edges.begin() + edgesPerNode, graph.items[{node, NodeEnd::Start}].edges.end());
+		}
+	}
+	verifyGraph(graph);
+}
+
 GroupingBluntify getSmallerGraph(const BluntedCliques& cliques, int oldOverlap)
 {
 	assert(oldOverlap > 0);
@@ -218,8 +410,12 @@ GroupingBluntify getSmallerGraph(const BluntedCliques& cliques, int oldOverlap)
 		auto to = cliques.edges[i].second;
 		assert(from.first < result.items.size());
 		assert(to.first < result.items.size());
-		result.items[from].edges.push_unique(to);
-		result.items[to].edges.push_unique(from);
+		brokeNodeId = result.originals[from.first].id;
+		brokeNodeOffset = result.originals[from.first].offset;
+		push_unique(result.items[from].edges, to);
+		brokeNodeId = result.originals[from.first].id;
+		brokeNodeOffset = result.originals[from.first].offset;
+		push_unique(result.items[to].edges, from);
 	}
 	return result;
 }
@@ -464,11 +660,11 @@ void fillEdgeCliques(GroupingBluntify& graph)
 	{
 		for (auto left : cliques[i].left)
 		{
-			graph.items[left].cliques.push_unique(i, NodeEnd::End);
+			push_unique(graph.items[left].cliques, NodePos {i, NodeEnd::End});
 		}
 		for (auto right : cliques[i].right)
 		{
-			graph.items[right].cliques.push_unique(i, NodeEnd::Start);
+			push_unique(graph.items[right].cliques, NodePos {i, NodeEnd::Start});
 		}
 	}
 }
@@ -507,6 +703,8 @@ BluntedCliques getBluntedCliques(const GroupingBluntify& grouping)
 			result.originalNodeAndOffset[numCliques + numExtras] = grouping.originals[i];
 			result.originalNodeAndOffset[numCliques + numExtras].size -= 2;
 			result.originalNodeAndOffset[numCliques + numExtras].offset += 1;
+			assert((grouping.items[{i, NodeEnd::End}].cliques.size() == 1));
+			assert((grouping.items[{i, NodeEnd::Start}].cliques.size() == 1));
 			for (size_t j = 0; j < grouping.items[{i, NodeEnd::End}].cliques.size(); j++)
 			{
 				result.edges.emplace_back(grouping.items[{i, NodeEnd::End}].cliques[j], NodePos {numCliques + numExtras, NodeEnd::End});
@@ -648,8 +846,8 @@ GroupingBluntify loadUnbluntGFA(std::string filename)
 					result.originals[pos+1].offset = 1;
 					result.originals[pos+1].reverse = false;
 					result.originals[pos+1].size = result.overlap + 1;
-					result.items[{pos, NodeEnd::End}].edges.push_unique({pos+1, NodeEnd::Start});
-					result.items[{pos+1, NodeEnd::Start}].edges.push_unique({pos, NodeEnd::End});
+					push_unique(result.items[{pos, NodeEnd::End}].edges, NodePos {pos+1, NodeEnd::Start});
+					push_unique(result.items[{pos+1, NodeEnd::Start}].edges, NodePos {pos, NodeEnd::End});
 					pos += 2;
 				}
 				else if (seq.size() > result.overlap + 2)
@@ -663,10 +861,10 @@ GroupingBluntify loadUnbluntGFA(std::string filename)
 					result.originals[pos+2].offset = 1;
 					result.originals[pos+2].reverse = false;
 					result.originals[pos+2].size = seq.size() - 2;
-					result.items[{pos, NodeEnd::End}].edges.push_unique({pos+2, NodeEnd::Start});
-					result.items[{pos+2, NodeEnd::Start}].edges.push_unique({pos, NodeEnd::End});
-					result.items[{pos+2, NodeEnd::End}].edges.push_unique({pos+1, NodeEnd::Start});
-					result.items[{pos+1, NodeEnd::Start}].edges.push_unique({pos+2, NodeEnd::End});
+					push_unique(result.items[{pos, NodeEnd::End}].edges, NodePos {pos+2, NodeEnd::Start});
+					push_unique(result.items[{pos+2, NodeEnd::Start}].edges, NodePos {pos, NodeEnd::End});
+					push_unique(result.items[{pos+2, NodeEnd::End}].edges, NodePos {pos+1, NodeEnd::Start});
+					push_unique(result.items[{pos+1, NodeEnd::Start}].edges, NodePos {pos+2, NodeEnd::End});
 					pos += 3;
 				}
 				else
@@ -695,8 +893,8 @@ GroupingBluntify loadUnbluntGFA(std::string filename)
 				}
 				assert(start.first < result.items.size());
 				assert(end.first < result.items.size());
-				result.items[start].edges.push_unique(end);
-				result.items[end].edges.push_unique(start);
+				push_unique(result.items[start].edges, end);
+				push_unique(result.items[end].edges, start);
 			}
 		}
 		assert(pos == resultSize);
@@ -792,33 +990,6 @@ void printGraph(const GroupingBluntify& graph)
 	}
 }
 
-void verifyGraph(const GroupingBluntify& graph)
-{
-	for (size_t i = 0; i < graph.items.size(); i++)
-	{
-		for (size_t j = 0; j < graph.items[{i, NodeEnd::Start}].edges.size(); j++)
-		{
-			auto target = graph.items[{i, NodeEnd::Start}].edges[j];
-			bool found = false;
-			for (size_t k = 0; k < graph.items[target].edges.size(); k++)
-			{
-				if (graph.items[target].edges[k].first == i && graph.items[target].edges[k].second == NodeEnd::Start) found = true;
-			}
-			assert(found);
-		}
-		for (size_t j = 0; j < graph.items[{i, NodeEnd::End}].edges.size(); j++)
-		{
-			auto target = graph.items[{i, NodeEnd::End}].edges[j];
-			bool found = false;
-			for (size_t k = 0; k < graph.items[target].edges.size(); k++)
-			{
-				if (graph.items[target].edges[k].first == i && graph.items[target].edges[k].second == NodeEnd::End) found = true;
-			}
-			assert(found);
-		}
-	}
-}
-
 void printCliques(const GroupingBluntify& graph)
 {
 	std::cerr << "cliques" << std::endl;
@@ -843,15 +1014,23 @@ int main(int argc, char** argv)
 	auto graph = loadUnbluntGFA(argv[1]);
 	while (graph.overlap > 0)
 	{
-		std::cerr << "overlap " << graph.overlap << " size " << graph.items.size() << std::endl;
+		std::cerr << "overlap " << graph.overlap << " size " << graph.items.size() << " maxDegree " << graph.maxDegree() << std::endl;
 		// printGraph(graph);
 		verifyGraph(graph);
 		fillEdgeCliques(graph);
 		// printCliques(graph);
 		auto cliques = getBluntedCliques(graph);
 		graph = getSmallerGraph(cliques, graph.overlap);
+		// std::cerr << "overlap " << graph.overlap << " size " << graph.items.size() << " pre-shrink maxDegree " << graph.maxDegree() << std::endl;
+		// splitLargeDegreeNodes(graph, 4);
+		// verifyGraph(graph);
+		// std::cerr << "overlap " << graph.overlap << " size " << graph.items.size() << " pre-shrink maxDegree " << graph.maxDegree() << std::endl;
+		// splitLargeDegreeNodes(graph, 4);
+		// verifyGraph(graph);
+		// std::cerr << "overlap " << graph.overlap << " size " << graph.items.size() << " pre-shrink maxDegree " << graph.maxDegree() << std::endl;
+		// assert(graph.maxDegree() <= 4);
 	}
-	std::cerr << "overlap " << graph.overlap << " size " << graph.items.size() << std::endl;
+	std::cerr << "overlap " << graph.overlap << " size " << graph.items.size() << " maxDegree " << graph.maxDegree() << std::endl;
 	// printGraph(graph);
 	verifyGraph(graph);
 	writeResultGfa(graph, argv[1], argv[2]);
