@@ -192,6 +192,15 @@ public:
 #endif
 	}
 
+	ScoreType changedMinScoreInsideBand(const WordSlice& other, const WordSlice& band) const
+	{
+		if (other.scoreBeforeStart == std::numeric_limits<ScoreType>::max()) return minScoreInsideBand(band);
+		auto bandMask = insideBandMask(band);
+		auto otherMask = differenceMasks(VP, VN, other.VP, other.VN, other.scoreBeforeStart - scoreBeforeStart);
+		auto result = minScoreInsideMask(bandMask & otherMask.first);
+		return result;
+	}
+
 	ScoreType changedMinScore(WordSlice other) const
 	{
 		if (other.scoreBeforeStart == std::numeric_limits<ScoreType>::max()) return std::min(scoreBeforeStart, minScore);
@@ -222,7 +231,33 @@ public:
 		return value;
 	}
 
+	bool smallerOrEqualSomewhere(const WordSlice& band) const
+	{
+		auto mask = insideBandMask(band);
+		return mask != WordConfiguration<Word>::AllZeros;
+	}
+
+	bool changedSmallerOrEqualSomewhere(const WordSlice& old, const WordSlice& band) const
+	{
+		auto changedMask = differenceMasks(VP, VN, old.VP, old.VN, old.scoreBeforeStart - scoreBeforeStart);
+		if (changedMask.first == WordConfiguration<Word>::AllZeros) return false;
+		auto bandMask = insideBandMask(band);
+		auto smallerAndInBand = changedMask.first & bandMask;
+		return smallerAndInBand != WordConfiguration<Word>::AllZeros;
+	}
+
 private:
+
+	Word insideBandMask(const WordSlice& band) const
+	{
+		if (scoreBeforeStart > band.scoreBeforeStart)
+		{
+			auto bandMask = differenceMasks(band.VP, band.VN, VP, VN, scoreBeforeStart - band.scoreBeforeStart);
+			return ~bandMask.first;
+		}
+		auto bandMask = differenceMasks(VP, VN, band.VP, band.VN, band.scoreBeforeStart - scoreBeforeStart);
+		return ~bandMask.second;
+	}
 
 #ifdef EXTRACORRECTNESSASSERTIONS
 	ScoreType changedMinScoreCellByCell(WordSlice oldSlice) const
@@ -257,32 +292,35 @@ private:
 		}
 		return minScore;
 	}
+
+	ScoreType minScoreInsideBandCellbycell(const WordSlice& band) const
+	{
+		ScoreType result = std::numeric_limits<ScoreType>::max();
+		for (int i = 0; i < WordConfiguration<Word>::WordSize; i++)
+		{
+			if (getValue(i) <= band.getValue(i))
+			{
+				result = std::min(result, getValue(i));
+			}
+		}
+		return result;
+	}
 #endif
 
-	bool minScoreLocalMinimaSmallerThan(ScoreType score) const
+	ScoreType minScoreInsideBand(const WordSlice& band) const
 	{
-		//rightmost VP between any VN's, aka one cell to the left of a minimum
-		Word possibleLocalMinima = (VP & (VN - VP));
-		//shift right by one to get the minimum
-		possibleLocalMinima >>= 1;
-		//leftmost bit might be a minimum if there is no VP to its right
-		possibleLocalMinima |= WordConfiguration<Word>::LastBit & (VN | ~(VN - VP)) & ~VP;
-		if (scoreBeforeStart + (VP & 1) - (VN & 1) <= score) return true;
-		//the score is inited to the first cell at the start
-		possibleLocalMinima &= ~((Word)1);
-		while (possibleLocalMinima != 0)
-		{
-			//all cells from the right up to the first minimum are one
-			Word currentMinimumMask = possibleLocalMinima ^ (possibleLocalMinima-1);
-			ScoreType scoreHere = scoreBeforeStart - WordConfiguration<Word>::popcount(VN & currentMinimumMask);
-			if (scoreHere <= score)
-			{
-				scoreHere += WordConfiguration<Word>::popcount(VP & currentMinimumMask);
-				if (scoreHere <= score) return true;
-			}
-			possibleLocalMinima &= ~currentMinimumMask;
-		}
-		return false;
+		auto result = minScoreInsideBandLocalMinima(band);
+#ifdef EXTRACORRECTNESSASSERTIONS
+		assert(result == minScoreInsideBandCellbycell(band));
+#endif
+		return result;
+	}
+
+	ScoreType minScoreInsideBandLocalMinima(const WordSlice& band) const
+	{
+		auto mask = insideBandMask(band);
+		ScoreType result = minScoreInsideMask(mask);
+		return result;
 	}
 
 	ScoreType minScoreLocalMinima() const
@@ -309,24 +347,35 @@ private:
 
 	ScoreType changedMinScoreLocalMinima(WordSlice oldSlice) const
 	{
+		auto masks = differenceMasks(VP, VN, oldSlice.VP, oldSlice.VN, oldSlice.scoreBeforeStart - scoreBeforeStart);
+		Word smaller = masks.first;
+		ScoreType result = minScoreInsideMask(smaller);
+		if (scoreBeforeStart < oldSlice.scoreBeforeStart) result = std::min(result, scoreBeforeStart);
+		return result;
+	}
+
+	ScoreType minScoreInsideMask(Word mask) const
+	{
 		//rightmost VP between any VN's, aka one cell to the left of a minimum
 		Word possibleLocalMinima = (VP & (VN - VP));
 		//shift right by one to get the minimum
 		possibleLocalMinima >>= 1;
 		//leftmost bit might be a minimum if there is no VP to its right
 		possibleLocalMinima |= WordConfiguration<Word>::LastBit & (VN | ~(VN - VP)) & ~VP;
-		auto masks = differenceMasks(VP, VN, oldSlice.VP, oldSlice.VN, oldSlice.scoreBeforeStart - scoreBeforeStart);
-		Word smaller = masks.first;
 		//corner cases
-		if (smaller != WordConfiguration<Word>::AllOnes)
+		if (mask != WordConfiguration<Word>::AllOnes)
 		{
-			possibleLocalMinima |= (~smaller) >> 1;
-			possibleLocalMinima |= (~smaller) << 1;
+			possibleLocalMinima |= (~mask) >> 1;
+			possibleLocalMinima |= (~mask) << 1;
 			possibleLocalMinima |= 1;
 			possibleLocalMinima |= WordConfiguration<Word>::LastBit;
-			possibleLocalMinima &= smaller;
+			possibleLocalMinima &= mask;
 		}
-		ScoreType result = (scoreBeforeStart < oldSlice.scoreBeforeStart) ? scoreBeforeStart : std::numeric_limits<ScoreType>::max();
+		else
+		{
+			possibleLocalMinima |= 1;
+		}
+		ScoreType result = std::numeric_limits<ScoreType>::max();
 		while (possibleLocalMinima != 0)
 		{
 			//all cells from the right up to the first minimum are one

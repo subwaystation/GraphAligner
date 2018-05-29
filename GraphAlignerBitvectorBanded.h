@@ -68,6 +68,7 @@ private:
 		std::vector<size_t> nodes;
 		AlignmentCorrectnessEstimationState correctness;
 		LengthType j;
+		WordSlice bandSlice;
 		int bandwidth;
 		size_t cellsProcessed;
 		size_t numCells;
@@ -84,6 +85,7 @@ private:
 			result.nodes = nodes;
 			result.correctness = correctness;
 			result.j = j;
+			result.bandSlice = bandSlice;
 			result.bandwidth = bandwidth;
 			result.cellsProcessed = cellsProcessed;
 			result.numCells = numCells;
@@ -98,6 +100,7 @@ private:
 			result.nodes = nodes;
 			result.correctness = correctness;
 			result.j = j;
+			result.bandSlice = bandSlice;
 			result.bandwidth = bandwidth;
 			result.cellsProcessed = cellsProcessed;
 			result.numCells = numCells;
@@ -798,10 +801,11 @@ private:
 	public:
 		ScoreType minScore;
 		LengthType minScoreIndex;
+		WordSlice bandSlice;
 		size_t cellsProcessed;
 	};
 
-	NodeCalculationResult calculateNode(size_t i, size_t j, size_t startIndex, size_t endIndex, const std::string& sequence, const EqVector& EqV, NodeSlice<WordSlice>& currentSlice, const NodeSlice<WordSlice>& previousSlice, const std::vector<bool>& currentBand, const std::vector<bool>& previousBand, ScoreType previousSliceQuitScore, ScoreType quitScore, int bandwidth, const WordSlice& incoming, const WordSlice& incomingUp) const
+	NodeCalculationResult calculateNode(size_t i, size_t j, size_t startIndex, size_t endIndex, const std::string& sequence, const EqVector& EqV, NodeSlice<WordSlice>& currentSlice, const NodeSlice<WordSlice>& previousSlice, const std::vector<bool>& currentBand, const std::vector<bool>& previousBand, ScoreType previousSliceQuitScore, WordSlice& currentMinSlice, WordSlice& currentBandSlice, int bandwidth, const WordSlice& incoming, const WordSlice& incomingUp) const
 	{
 		BV::assertSliceCorrectness(incoming, incomingUp, incomingUp.sliceExists);
 		NodeCalculationResult result;
@@ -840,7 +844,6 @@ private:
 			currentWordSlice = currentWordSlice.mergeWithVertical(mergable);
 		}
 		BV::assertSliceCorrectness(currentWordSlice, upWordSlice, upWordSliceExists);
-		currentWordSlice.calcMinScore();
 		slice[startIndex] = currentWordSlice;
 #ifdef SLICEVERBOSE
 		slice[startIndex].debugCalcCount = oldWordSlice.debugCalcCount+1;
@@ -848,15 +851,20 @@ private:
 
 		result.minScore = currentWordSlice.scoreEnd;
 		result.minScoreIndex = nodeStart + startIndex;
-		quitScore = std::min(quitScore, result.minScore + bandwidth);
 
-		int timeUntilNextScoreCheck = quitScore - currentWordSlice.minScore;
-		if (endIndex <= startIndex && timeUntilNextScoreCheck < 0)
+		if (endIndex <= startIndex && oldWordSlice.sliceExists && currentWordSlice.VP == oldWordSlice.VP && currentWordSlice.VN == oldWordSlice.VN && currentWordSlice.scoreBeforeStart == oldWordSlice.scoreBeforeStart)
 		{
 			result.cellsProcessed = 1;
 			return result;
 		}
-		if (endIndex <= startIndex && oldWordSlice.sliceExists && currentWordSlice.VP == oldWordSlice.VP && currentWordSlice.VN == oldWordSlice.VN && currentWordSlice.scoreBeforeStart == oldWordSlice.scoreBeforeStart)
+		currentMinSlice = currentMinSlice.mergeWith(currentWordSlice);
+		assert(currentMinSlice.VN == WordConfiguration<Word>::AllZeros);
+		assert(currentMinSlice.scoreBeforeStart + bandwidth == currentBandSlice.scoreBeforeStart);
+		currentBandSlice.VP = currentMinSlice.VP;
+		currentBandSlice.VN = currentMinSlice.VN;
+		currentBandSlice.scoreEnd = currentMinSlice.scoreEnd + bandwidth;
+		BV::assertSliceCorrectness(currentBandSlice, currentBandSlice, false);
+		if (endIndex <= startIndex && !currentMinSlice.smallerOrEqualSomewhere(currentBandSlice))
 		{
 			result.cellsProcessed = 1;
 			return result;
@@ -890,7 +898,6 @@ private:
 			{
 				result.minScore = currentWordSlice.scoreEnd;
 				result.minScoreIndex = nodeStart + w;
-				quitScore = std::min(quitScore, result.minScore + bandwidth);
 			}
 
 #ifdef EXTRACORRECTNESSASSERTIONS
@@ -903,23 +910,24 @@ private:
 			}
 #endif
 
-			timeUntilNextScoreCheck--;
-			if (timeUntilNextScoreCheck < 0 || w == nodeSize-1)
-			{
-				currentWordSlice.calcMinScore();
-				timeUntilNextScoreCheck = quitScore - currentWordSlice.minScore;
-			}
 			slice[w] = currentWordSlice;
 #ifdef SLICEVERBOSE
 			slice[w].debugCalcCount = oldWordSlice.debugCalcCount+1;
 #endif
 
-			if (endIndex <= w && timeUntilNextScoreCheck < 0)
+			if (endIndex <= w && oldWordSlice.sliceExists && currentWordSlice.VP == oldWordSlice.VP && currentWordSlice.VN == oldWordSlice.VN && currentWordSlice.scoreBeforeStart == oldWordSlice.scoreBeforeStart)
 			{
 				result.cellsProcessed = w - startIndex + 1;
 				return result;
 			}
-			if (endIndex <= w && oldWordSlice.sliceExists && currentWordSlice.VP == oldWordSlice.VP && currentWordSlice.VN == oldWordSlice.VN && currentWordSlice.scoreBeforeStart == oldWordSlice.scoreBeforeStart)
+			currentMinSlice = currentMinSlice.mergeWith(currentWordSlice);
+			assert(currentMinSlice.VN == WordConfiguration<Word>::AllZeros);
+			assert(currentMinSlice.scoreBeforeStart + bandwidth == currentBandSlice.scoreBeforeStart);
+			currentBandSlice.VP = currentMinSlice.VP;
+			currentBandSlice.VN = currentMinSlice.VN;
+			currentBandSlice.scoreEnd = currentMinSlice.scoreEnd + bandwidth;
+			BV::assertSliceCorrectness(currentBandSlice, currentBandSlice, false);
+			if (endIndex <= w && !currentMinSlice.smallerOrEqualSomewhere(currentBandSlice))
 			{
 				result.cellsProcessed = w - startIndex + 1;
 				return result;
@@ -967,6 +975,12 @@ private:
 		return getValueIfExists(params, slice, row, cell, defaultValue);
 	}
 
+	static bool cellExistsInBand(WordSlice slice, int row, WordSlice bandSlice)
+	{
+		if (!slice.sliceExists) return false;
+		return slice.getValue(row) <= bandSlice.getValue(row);
+	}
+
 	static bool cellExists(WordSlice slice, int row, int maxScore)
 	{
 		if (!slice.sliceExists) return false;
@@ -984,11 +998,12 @@ private:
 
 	void verifySliceBitvector(const std::string& sequence, const DPSlice& current, const DPSlice& previous) const
 	{
-		const ScoreType uninitScore = sequence.size() + 10000;
-		const auto lastrow = WordConfiguration<Word>::WordSize - 1;
+		//lots of volatiles to stop the compiler from optimizing the variables away
+		volatile ScoreType uninitScore = sequence.size() + 10000;
+		volatile auto lastrow = WordConfiguration<Word>::WordSize - 1;
 		for (auto pair : current.scores)
 		{
-			auto start = params.graph.NodeStart(pair.first);
+			volatile auto start = params.graph.NodeStart(pair.first);
 			for (size_t i = 1; i < pair.second.size(); i++)
 			{
 				volatile bool match = Common::characterMatch(sequence[current.j], params.graph.NodeSequences(start+i));
@@ -999,7 +1014,7 @@ private:
 					foundMinScore = volmin(foundMinScore, getValueIfExists(params, previous, lastrow, start+i, uninitScore)+1);
 					foundMinScore = volmin(foundMinScore, getValueIfExists(params, previous, lastrow, start+i-1, uninitScore) + (match ? 0 : 1));
 				}
-				if (cellExists(pair.second[i], 0, current.minScore + current.bandwidth)) assert(getValueIfExists(params, current, 0, start+i, uninitScore) == foundMinScore);
+				if (cellExistsInBand(pair.second[i], 0, current.bandSlice)) assert(getValueIfExists(params, current, 0, start+i, uninitScore) == foundMinScore);
 				for (int j = 1; j < WordConfiguration<Word>::WordSize; j++)
 				{
 					match = Common::characterMatch(sequence[current.j+j], params.graph.NodeSequences(start+i));
@@ -1007,7 +1022,7 @@ private:
 					foundMinScore = volmin(foundMinScore, getValueIfExists(params, current, j-1, start+i, uninitScore)+1);
 					foundMinScore = volmin(foundMinScore, getValueIfExists(params, current, j, start+i-1, uninitScore)+1);
 					foundMinScore = volmin(foundMinScore, getValueIfExists(params, current, j-1, start+i-1, uninitScore)+(match ? 0 : 1));
-					if (cellExists(pair.second[i], j, current.minScore + current.bandwidth)) assert(getValueIfExists(params, current, j, start+i, uninitScore) == foundMinScore);
+					if (cellExistsInBand(pair.second[i], j, current.bandSlice)) assert(getValueIfExists(params, current, j, start+i, uninitScore) == foundMinScore);
 				}
 			}
 			volatile ScoreType foundMinScore = uninitScore;
@@ -1031,7 +1046,7 @@ private:
 					foundMinScore = volmin(foundMinScore, getValueIfExists(params, previous, lastrow, params.graph.NodeEnd(neighbor)-1, uninitScore) + (match ? 0 : 1));
 				}
 			}
-			if (cellExists(pair.second[0], 0, current.minScore + current.bandwidth)) assert(getValueIfExists(params, current, 0, start, uninitScore) == foundMinScore);
+			if (cellExistsInBand(pair.second[0], 0, current.bandSlice)) assert(getValueIfExists(params, current, 0, start, uninitScore) == foundMinScore);
 			for (int j = 1; j < WordConfiguration<Word>::WordSize; j++)
 			{
 				foundMinScore = uninitScore;
@@ -1043,7 +1058,7 @@ private:
 					foundMinScore = volmin(foundMinScore, getValueIfExists(params, current, j, params.graph.NodeEnd(neighbor)-1, uninitScore)+1);
 					foundMinScore = volmin(foundMinScore, getValueIfExists(params, current, j-1, params.graph.NodeEnd(neighbor)-1, uninitScore)+(match ? 0 : 1));
 				}
-				if (cellExists(pair.second[0], j, current.minScore + current.bandwidth)) assert(getValueIfExists(params, current, j, start, uninitScore) == foundMinScore);
+				if (cellExistsInBand(pair.second[0], j, current.bandSlice)) assert(getValueIfExists(params, current, j, start, uninitScore) == foundMinScore);
 			}
 		}
 	}
@@ -1093,14 +1108,15 @@ private:
 	}
 
 #ifdef EXTRACORRECTNESSASSERTIONS
-	void assertBitvectorConfirmedAreConsistent(WordSlice newslice, WordSlice oldslice, ScoreType quitScore) const
+	void assertBitvectorConfirmedAreConsistent(WordSlice newslice, WordSlice oldslice, WordSlice bandSlice) const
 	{
 		assert(newslice.scoreBeforeStart <= oldslice.scoreBeforeStart);
 		for (int i = 0; i < 64; i++)
 		{
 			auto newScore = newslice.getValue(i);
 			auto oldScore = oldslice.getValue(i);
-			if (oldScore <= quitScore) assert(newslice.getValue(i) <= oldslice.getValue(i));
+			auto bandScore = bandSlice.getValue(i);
+			if (oldScore <= bandScore) assert(newslice.getValue(i) <= oldslice.getValue(i));
 		}
 	}
 #endif
@@ -1155,7 +1171,11 @@ private:
 				currentSlice.node(node)[startIndex] = startSlice;
 				assert(wordSlice.sliceExists);
 				BV::assertSliceCorrectness(startSlice, wordSlice, true);
-				if (startIndex != params.graph.NodeLength(node)-1)
+				if (j == 0)
+				{
+					calculableQueue.insert(priority, EdgeWithPriority { node, 0, previousSlice.endIndex(node), priority, startSlice, wordSlice });
+				}
+				else if (startIndex != params.graph.NodeLength(node)-1)
 				{
 					calculableQueue.insert(priority, EdgeWithPriority { node, previousSlice.startIndex(node)+1, previousSlice.endIndex(node), priority, startSlice, wordSlice });
 				}
@@ -1170,11 +1190,13 @@ private:
 		}
 		assert(calculableQueue.size() != 0);
 		
-		ScoreType currentMinScoreAtEndRow = std::numeric_limits<ScoreType>::max() - bandwidth - 1;
+		WordSlice currentMinSlice { WordConfiguration<Word>::AllOnes, WordConfiguration<Word>::AllZeros, previousMinScore + WordConfiguration<Word>::WordSize, previousMinScore, true };
+		WordSlice currentBandSlice { currentMinSlice.VP, currentMinSlice.VN, currentMinSlice.scoreEnd + bandwidth, currentMinSlice.scoreBeforeStart + bandwidth, true };
 		while (calculableQueue.size() > 0)
 		{
 			auto pair = calculableQueue.top();
-			if (pair.priority > currentMinScoreAtEndRow + bandwidth) break;
+			calculableQueue.pop();
+			if (pair.endOffset == 0 && !pair.incoming.smallerOrEqualSomewhere(currentBandSlice)) continue;
 			auto i = pair.target;
 			size_t offset = pair.offset;
 			size_t endOffset = pair.endOffset;
@@ -1189,7 +1211,6 @@ private:
 				currentBand[i] = true;
 			}
 			assert(currentBand[i]);
-			calculableQueue.pop();
 			auto oldEnd = currentSlice.node(i).back();
 #ifdef EXTRACORRECTNESSASSERTIONS
 			std::vector<WordSlice> debugOldNode;
@@ -1199,24 +1220,24 @@ private:
 				debugOldNode.push_back(debugNode[ii]);
 			}
 #endif
-			auto nodeCalc = calculateNode(i, j, offset, endOffset, sequence, EqV, currentSlice, previousSlice, currentBand, previousBand, previousQuitScore, currentMinScoreAtEndRow + bandwidth, bandwidth, incoming, incomingUp);
+			auto nodeCalc = calculateNode(i, j, offset, endOffset, sequence, EqV, currentSlice, previousSlice, currentBand, previousBand, previousQuitScore, currentMinSlice, currentBandSlice, bandwidth, incoming, incomingUp);
 			assert(nodeCalc.minScore <= previousQuitScore + WordConfiguration<Word>::WordSize);
-			currentMinScoreAtEndRow = std::min(currentMinScoreAtEndRow, nodeCalc.minScore);
 			currentSlice.setMinScoreIfSmaller(i, nodeCalc.minScore);
 			auto newEnd = currentSlice.node(i).back();
 #ifdef EXTRACORRECTNESSASSERTIONS
 			auto debugNewNode = currentSlice.node(i);
 			for (size_t debugi = 0; debugi < debugOldNode.size(); debugi++)
 			{
-				assertBitvectorConfirmedAreConsistent(debugNewNode[debugi], debugOldNode[debugi], currentMinScoreAtEndRow + bandwidth);
+				assertBitvectorConfirmedAreConsistent(debugNewNode[debugi], debugOldNode[debugi], currentBandSlice);
 			}
 #endif
 			if (newEnd.scoreBeforeStart != oldEnd.scoreBeforeStart || newEnd.VP != oldEnd.VP || newEnd.VN != oldEnd.VN)
 			{
-				ScoreType newEndMinScore = newEnd.changedMinScore(oldEnd);
-				assert(newEndMinScore != std::numeric_limits<ScoreType>::max());
-				if (newEndMinScore <= currentMinScoreAtEndRow + bandwidth)
+				auto newEndMinScore = newEnd.changedMinScoreInsideBand(oldEnd, currentBandSlice);
+				if (newEndMinScore != std::numeric_limits<ScoreType>::max())
 				{
+					assert(newEndMinScore <= currentBandSlice.scoreEnd);
+					assert(newEndMinScore >= previousMinScore);
 					WordSlice up { WordConfiguration<Word>::AllZeros, WordConfiguration<Word>::AllOnes, newEnd.scoreBeforeStart, newEnd.scoreBeforeStart + WordConfiguration<Word>::WordSize, false };
 					if (previousSlice.hasNode(i))
 					{
@@ -1232,7 +1253,7 @@ private:
 			}
 #ifndef NDEBUG
 			auto debugslice = currentSlice.node(i);
-			if (nodeCalc.minScore <= currentMinScoreAtEndRow + bandwidth)
+			if (nodeCalc.minScore <= currentBandSlice.scoreEnd)
 			{
 				assert(nodeCalc.minScoreIndex >= params.graph.NodeStart(i));
 				assert(nodeCalc.minScoreIndex < params.graph.NodeEnd(i));
@@ -1244,15 +1265,19 @@ private:
 				currentMinimumScore = nodeCalc.minScore;
 				currentMinimumIndex = nodeCalc.minScoreIndex;
 			}
-			assert(currentMinimumScore == currentMinScoreAtEndRow);
+			assert(currentMinimumScore == currentMinSlice.scoreEnd);
 			cellsProcessed += nodeCalc.cellsProcessed;
 			if (cellsProcessed > params.maxCellsPerSlice) break;
 		}
 
+		assert(calculableQueue.size() == 0);
+		assert(cellsProcessed > 0);
+		assert(currentMinimumScore == currentMinSlice.scoreEnd);
 		NodeCalculationResult result;
 		result.minScore = currentMinimumScore;
 		result.minScoreIndex = currentMinimumIndex;
 		result.cellsProcessed = cellsProcessed;
+		result.bandSlice = currentBandSlice;
 
 		if (j + WordConfiguration<Word>::WordSize > sequence.size())
 		{
@@ -1260,8 +1285,6 @@ private:
 		}
 
 		finalizeSlice(currentSlice, result, bandwidth);
-
-		calculableQueue.clear();
 
 		return result;
 	}
@@ -1365,6 +1388,7 @@ private:
 		slice.cellsProcessed = sliceResult.cellsProcessed;
 		slice.minScoreIndex = sliceResult.minScoreIndex;
 		slice.minScore = sliceResult.minScore;
+		slice.bandSlice = sliceResult.bandSlice;
 		assert(slice.minScore >= previousSlice.minScore);
 		for (auto node : slice.scores)
 		{
