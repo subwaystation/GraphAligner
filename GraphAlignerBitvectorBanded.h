@@ -1192,6 +1192,9 @@ private:
 		
 		WordSlice currentMinSlice { WordConfiguration<Word>::AllOnes, WordConfiguration<Word>::AllZeros, previousMinScore + WordConfiguration<Word>::WordSize, previousMinScore, true };
 		WordSlice currentBandSlice { currentMinSlice.VP, currentMinSlice.VN, currentMinSlice.scoreEnd + bandwidth, currentMinSlice.scoreBeforeStart + bandwidth, true };
+
+		size_t cellsProcessedAtMinConvergence = 0;
+
 		while (calculableQueue.size() > 0)
 		{
 			auto pair = calculableQueue.top();
@@ -1220,7 +1223,12 @@ private:
 				debugOldNode.push_back(debugNode[ii]);
 			}
 #endif
+			WordSlice oldMinSlice = currentMinSlice;
 			auto nodeCalc = calculateNode(i, j, offset, endOffset, sequence, EqV, currentSlice, previousSlice, currentBand, previousBand, previousQuitScore, currentMinSlice, currentBandSlice, bandwidth, incoming, incomingUp);
+			if (oldMinSlice.VP != currentMinSlice.VP)
+			{
+				cellsProcessedAtMinConvergence = cellsProcessed + nodeCalc.cellsProcessed;
+			}
 			assert(nodeCalc.minScore <= previousQuitScore + WordConfiguration<Word>::WordSize);
 			currentSlice.setMinScoreIfSmaller(i, nodeCalc.minScore);
 			auto newEnd = currentSlice.node(i).back();
@@ -1233,11 +1241,11 @@ private:
 #endif
 			if (newEnd.scoreBeforeStart != oldEnd.scoreBeforeStart || newEnd.VP != oldEnd.VP || newEnd.VN != oldEnd.VN)
 			{
-				auto newEndMinScore = newEnd.changedMinScoreInsideBand(oldEnd, currentBandSlice);
+				auto newEndMinScore = newEnd.changedMinScoreLessThanBand(oldEnd, currentMinSlice, currentBandSlice);
 				if (newEndMinScore != std::numeric_limits<ScoreType>::max())
 				{
-					assert(newEndMinScore <= currentBandSlice.scoreEnd);
-					assert(newEndMinScore >= previousMinScore);
+					assert(newEndMinScore >= 0);
+					assert(newEndMinScore <= bandwidth);
 					WordSlice up { WordConfiguration<Word>::AllZeros, WordConfiguration<Word>::AllOnes, newEnd.scoreBeforeStart, newEnd.scoreBeforeStart + WordConfiguration<Word>::WordSize, false };
 					if (previousSlice.hasNode(i))
 					{
@@ -1247,7 +1255,7 @@ private:
 					BV::assertSliceCorrectness(newEnd, up, up.sliceExists);
 					for (auto neighbor : params.graph.outNeighbors[i])
 					{
-						calculableQueue.insert(newEndMinScore - previousMinScore, EdgeWithPriority { neighbor, 0, 0, newEndMinScore - previousMinScore, newEnd, up });
+						calculableQueue.insert(newEndMinScore, EdgeWithPriority { neighbor, 0, 0, newEndMinScore, newEnd, up });
 					}
 				}
 			}
@@ -1269,6 +1277,10 @@ private:
 			cellsProcessed += nodeCalc.cellsProcessed;
 			if (cellsProcessed > params.maxCellsPerSlice) break;
 		}
+
+#ifdef SLICEVERBOSE
+		std::cerr << " convergecells " << cellsProcessedAtMinConvergence << " ";
+#endif
 
 		assert(calculableQueue.size() == 0);
 		assert(cellsProcessed > 0);

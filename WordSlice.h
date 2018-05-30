@@ -246,6 +246,47 @@ public:
 		return smallerAndInBand != WordConfiguration<Word>::AllZeros;
 	}
 
+	ScoreType changedMinScoreLessThanBand(const WordSlice& old, const WordSlice& min, const WordSlice& band) const
+	{
+		auto changedMask = differenceMasks(VP, VN, old.VP, old.VN, old.scoreBeforeStart - scoreBeforeStart);
+		if (changedMask.first == WordConfiguration<Word>::AllZeros) return false;
+		auto bandMask = insideBandMask(band);
+		auto mask = changedMask.first & bandMask;
+
+		//rightmost VP between any VN's, aka one cell to the left of a minimum
+		Word changePlus = (VP & ~min.VP) | (~VN & min.VN);
+		Word changeMinus = (VN & ~min.VN) | (~VP & min.VP);
+		Word possibleLocalMinima = (changePlus & (changeMinus - changePlus));
+		//shift right by one to get the minimum
+		possibleLocalMinima >>= 1;
+		//leftmost bit might be a minimum if there is no VP to its right
+		possibleLocalMinima |= WordConfiguration<Word>::LastBit & (changeMinus | ~(changeMinus - changePlus)) & ~changePlus;
+		//corner cases
+		if (mask != WordConfiguration<Word>::AllOnes)
+		{
+			possibleLocalMinima |= (~mask) >> 1;
+			possibleLocalMinima |= (~mask) << 1;
+			possibleLocalMinima |= 1;
+			possibleLocalMinima |= WordConfiguration<Word>::LastBit;
+			possibleLocalMinima &= mask;
+		}
+		else
+		{
+			possibleLocalMinima |= 1;
+		}
+		ScoreType result = std::numeric_limits<ScoreType>::max();
+		while (possibleLocalMinima != 0)
+		{
+			//all cells from the right up to the first minimum are one
+			Word currentMinimumMask = possibleLocalMinima ^ (possibleLocalMinima-1);
+			ScoreType scoreHere = scoreBeforeStart + WordConfiguration<Word>::popcount(VP & currentMinimumMask) - WordConfiguration<Word>::popcount(VN & currentMinimumMask);
+			ScoreType minScoreHere = min.scoreBeforeStart + WordConfiguration<Word>::popcount(min.VP & currentMinimumMask) - WordConfiguration<Word>::popcount(min.VN & currentMinimumMask);
+			result = std::min(result, scoreHere - minScoreHere);
+			possibleLocalMinima &= ~currentMinimumMask;
+		}
+		return result;
+	}
+
 private:
 
 	Word insideBandMask(const WordSlice& band) const
