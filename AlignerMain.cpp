@@ -113,7 +113,6 @@ int main(int argc, char** argv)
 		std::exit(0);
 	}
 
-	ByteStuff::precalculateByteStuff();
 	alignReads(params);
 
 	return 0;
