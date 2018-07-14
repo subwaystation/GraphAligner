@@ -1,9 +1,13 @@
 #include <unordered_map>
 #include <iostream>
 #include <chrono>
+#include <cmath>
 #include "MinimizerGraph.h"
 #include "ThreadReadAssertion.h"
 #include "CommonUtils.h"
+
+constexpr int MAX_GRAPH_TOPO_DISTANCE = 32;
+constexpr int MAX_SEQ_MINMER_DISTANCE = 32;
 
 size_t charNum(char c)
 {
@@ -22,6 +26,8 @@ size_t charNum(char c)
 		case 't':
 			return 3;
 	}
+	assert(false);
+	return 0;
 }
 
 std::string getHPC(const std::string& str)
@@ -39,14 +45,46 @@ MinimizerGraph::MinimizerGraph(size_t k, size_t w, const GfaGraph& graph) :
 k(k),
 w(w)
 {
-	assert(k < 32);
+	assert(k < sizeof(size_t) * 8 / 2);
 	assert(graph.edgeOverlap > k+w);
+	initRandomOrdering();
 	initTopology(graph);
+}
+
+void MinimizerGraph::initRandomOrdering()
+{
+	minmerOrdering.resize(pow(2, k * 2));
+	for (size_t i = 0; i < minmerOrdering.size(); i++)
+	{
+		minmerOrdering[i] = i;
+	}
+	for (size_t i = 0; i < minmerOrdering.size(); i++)
+	{
+		std::swap(minmerOrdering[i], minmerOrdering[i+(rand() % (minmerOrdering.size()-i))]);
+	}
 }
 
 bool MinimizerGraph::minmerCompare(size_t left, size_t right) const
 {
-	return left < right;
+	return minmerOrdering[left] < minmerOrdering[right];
+}
+
+void add(std::vector<size_t>& vec, size_t minmer)
+{
+	for (size_t i = 0; i < vec.size(); i++)
+	{
+		if (vec[i] == minmer) return;
+	}
+	vec.emplace_back(minmer);
+}
+
+void add(std::vector<GraphPos>& vec, GraphPos minmer)
+{
+	for (size_t i = 0; i < vec.size(); i++)
+	{
+		if (vec[i] == minmer) return;
+	}
+	vec.emplace_back(minmer);
 }
 
 void add(std::vector<std::pair<size_t, size_t>>& vec, size_t minmer, size_t length)
@@ -58,76 +96,82 @@ void add(std::vector<std::pair<size_t, size_t>>& vec, size_t minmer, size_t leng
 	vec.emplace_back(minmer, length);
 }
 
+void add(std::vector<std::pair<GraphPos, size_t>>& vec, GraphPos minmer, size_t length)
+{
+	for (size_t i = 0; i < vec.size(); i++)
+	{
+		if (vec[i].first == minmer) return;
+	}
+	vec.emplace_back(minmer, length);
+}
+
 void MinimizerGraph::initTopology(const GfaGraph& graph)
 {
-	std::vector<size_t> window;
-	window.resize(w);
-	for (auto source : graph.nodes)
+	minmerIndex.resize(pow(2, k * 2));
+	minmerIndex.reserve(graph.nodes.size());
+	topology.reserve(graph.nodes.size());
+	minmersPerEdgeGroup.reserve(graph.nodes.size());
+
+	std::unordered_map<std::string, size_t> edgeIds;
+	for (auto node : graph.nodes)
 	{
-		for (int i = 0; i < 2; i++)
+		std::string startEdge = node.second.substr(0, graph.edgeOverlap);
+		std::string endEdge = node.second.substr(node.second.size() - graph.edgeOverlap);
+		size_t startId = 0;
+		size_t endId = 0;
+		if (edgeIds.count(startEdge) == 1)
 		{
-			std::string combo;
-			// if (i == 0) combo = getHPC(source.second); else combo = getHPC(CommonUtils::ReverseComplement(source.second));
-			if (i == 0) combo = source.second; else combo = CommonUtils::ReverseComplement(source.second);
-			assert(combo.size() > k+w);
-			window[0] = minmerize(combo.substr(0, k));
-			size_t smallestPos = 0;
-			for (size_t i = 1; i < w; i++)
-			{
-				window[i] = nextminmer(window[i-1], combo[k+i-1]);
-				if (minmerCompare(window[i], window[smallestPos])) smallestPos = i;
-			}
-			std::vector<std::pair<size_t, size_t>> minmers;
-			minmers.emplace_back(window[smallestPos], smallestPos);
-			for (size_t combopos = k+w; combopos < combo.size(); combopos++)
-			{
-				size_t windowpos = (combopos - k) % w;
-				size_t newMinmer = nextminmer(window[(windowpos + w - 1) % w], combo[combopos]);
-				if (smallestPos == windowpos)
-				{
-					size_t oldSmallest = window[smallestPos];
-					size_t oldSmallestPos = smallestPos;
-					window[windowpos] = newMinmer;
-					for (size_t i = 0; i < w; i++)
-					{
-						if (minmerCompare(window[i], window[smallestPos])) smallestPos = i;
-					}
-					size_t dist = (smallestPos + w - oldSmallestPos) % w;
-					if (dist == 0) dist = w;
-					minmers.emplace_back(window[smallestPos], combopos);
-					// add(minmerTopology[window[smallestPos]], oldSmallest, dist);
-				}
-				else if (minmerCompare(newMinmer, window[smallestPos]))
-				{
-					minmers.emplace_back(window[smallestPos], combopos);
-					// add(minmerTopology[newMinmer], window[smallestPos], (windowpos + w - smallestPos) % w);
-					smallestPos = windowpos;
-					window[windowpos] = newMinmer;
-				}
-			}
-			for (size_t i = 1; i < minmers.size(); i++)
-			{
-				for (size_t j = i-1; j < i; j++)
-				{
-					add(minmerTopology[minmers[i].first], minmers[j].first, minmers[i].second - minmers[j].second);
-				}
-			}
+			startId = edgeIds[startEdge];
 		}
+		else
+		{
+			minmerIndex.emplace_back();
+			topology.emplace_back();
+			minmersPerEdgeGroup.emplace_back();
+
+			startId = edgeIds.size();
+			doForMinimizers(startEdge, [this, startId](size_t minmer, size_t pos)
+			{
+				add(minmersPerEdgeGroup[startId], GraphPos { startId, pos, false });
+				add(minmerIndex[minmer], GraphPos { startId, pos, false });
+			});
+			edgeIds[startEdge] = startId;
+		}
+		if (edgeIds.count(endEdge) == 1)
+		{
+			endId = edgeIds[endEdge];
+		}
+		else
+		{
+			minmerIndex.emplace_back();
+			topology.emplace_back();
+			minmersPerEdgeGroup.emplace_back();
+
+			endId = edgeIds.size();
+			doForMinimizers(endEdge, [this, endId](size_t minmer, size_t pos)
+			{
+				add(minmersPerEdgeGroup[endId], GraphPos { endId, pos, false });
+				add(minmerIndex[minmer], GraphPos { endId, pos, false });
+			});
+			edgeIds[endEdge] = endId;
+		}
+		add(topology[endId], startId, node.second.size() - graph.edgeOverlap);
+		if (topology.size() % 1000 == 0) std::cerr << minmerIndex.size() << " " << topology.size() << std::endl;
 	}
-	size_t numEdges = 0;
-	for (auto pair : minmerTopology)
-	{
-		numEdges += pair.second.size();
-	}
-	std::cerr << "number of minimizers: " << minmerTopology.size() << std::endl;
-	std::cerr << "number of edges: " << numEdges << std::endl;
-	std::cerr << "graph density: " << ((double)numEdges / (double)minmerTopology.size() / (double)minmerTopology.size()) << std::endl;
+	// size_t numEdges = 0;
+	// for (auto pair : minmerTopology)
+	// {
+	// 	numEdges += pair.second.size();
+	// }
+	// std::cerr << "number of minimizers: " << minmerTopology.size() << std::endl;
+	// std::cerr << "number of edges: " << numEdges << std::endl;
+	// std::cerr << "graph density: " << ((double)numEdges / (double)minmerTopology.size() / (double)minmerTopology.size()) << std::endl;
 }
 
 size_t MinimizerGraph::minmerize(std::string kmer) const
 {
 	assert(kmer.size() == k);
-	size_t result;
+	size_t result = 0;
 	for (size_t i = 0; i < kmer.size(); i++)
 	{
 		result |= charNum(kmer[i]) << (i * 2);
@@ -142,14 +186,21 @@ size_t MinimizerGraph::nextminmer(size_t minmer, char newChar) const
 	return minmer;
 }
 
-std::vector<std::pair<size_t, size_t>> MinimizerGraph::inNeighbors(size_t minmer) const
+std::vector<std::pair<GraphPos, size_t>> MinimizerGraph::inNeighbors(GraphPos minmer) const
 {
-	auto found = minmerTopology.find(minmer);
-	if (found == minmerTopology.end())
+	std::vector<std::pair<GraphPos, size_t>> result;
+	for (auto mm : minmersPerEdgeGroup[minmer.node])
 	{
-		return std::vector<std::pair<size_t, size_t>> {};
+		if (mm.pos < minmer.pos) result.emplace_back(mm, minmer.pos - mm.pos);
 	}
-	return found->second;
+	for (auto predecessor : topology[minmer.node])
+	{
+		for (auto mm : minmersPerEdgeGroup[predecessor.first])
+		{
+			if (mm.pos < minmer.pos + predecessor.second) result.emplace_back(mm, minmer.pos + predecessor.second - mm.pos);
+		}
+	}
+	return result;
 }
 
 void MinimizerGraph::align(const std::string& originalSeq) const
@@ -162,60 +213,39 @@ void MinimizerGraph::align(const std::string& originalSeq) const
 	std::vector<size_t> lens;
 	lens.resize(seq.size(), 0);
 // #endif
-	std::unordered_map<size_t, size_t> lastMinmerPos;
-	std::vector<size_t> window;
-	window.resize(w);
-	window[0] = minmerize(seq.substr(0, k));
-	size_t smallestPos = 0;
-	std::unordered_map<size_t, size_t> lastMinmerLength;
-	for (size_t i = 1; i < w; i++)
+	std::unordered_map<GraphPos, size_t> lastMinmerSeqPos;
+	std::unordered_map<GraphPos, size_t> lastMinmerMatchLen;
+	doForMinimizers(seq, [this, &lens, &lastMinmerSeqPos, &lastMinmerMatchLen](size_t minimizer, size_t seqPos)
 	{
-		window[i] = nextminmer(window[i-1], seq[i]);
-		if (minmerCompare(window[i], window[smallestPos])) smallestPos = i;
-	}
-	for (size_t seqPos = k+w; seqPos < seq.size(); seqPos++)
-	{
-		size_t windowpos = (seqPos - k) % w;
-		size_t newMinmer = nextminmer(window[(windowpos + w - 1) % w], seq[seqPos]);
-		bool check = false;
-		window[windowpos] = newMinmer;
-		if (smallestPos == windowpos)
+		for (auto graphPos : minmerIndex[minimizer])
 		{
-			check = true;
-			for (size_t i = 0; i < w; i++)
-			{
-				if (minmerCompare(window[i], window[smallestPos])) smallestPos = i;
-			}
-		}
-		else if (minmerCompare(newMinmer, window[smallestPos]))
-		{
-			check = true;
-		}
-		if (check)
-		{
-			auto neighbors = inNeighbors(newMinmer);
+			auto neighbors = inNeighbors(graphPos);
 			size_t currentLen = 0;
 // #ifdef PRINTLENS
 			size_t lastPos = 0;
 // #endif
 			for (size_t i = 0; i < neighbors.size(); i++)
 			{
-				size_t lastLen = lastMinmerLength[neighbors[i].first];
-				int seqDist = seqPos - lastMinmerPos[neighbors[i].first];
+				size_t lastLen = lastMinmerMatchLen[neighbors[i].first];
+				int seqDist = seqPos - lastMinmerSeqPos[neighbors[i].first];
 				int topoDistance = neighbors[i].second;
-				assert(topoDistance <= k+w);
+				// assert(topoDistance <= k+w);
 				bool valid = true;
-				if (seqDist > (k+w)*2) valid = false;
+				if (seqDist > 32 || topoDistance > 32)
+				{
+					if (seqDist < topoDistance * 0.6 || seqDist > topoDistance / 0.6) valid = false;
+				}
+				// if (seqDist > MAX_SEQ_MINMER_DISTANCE) valid = false;
 				if (valid && topoDistance + lastLen > currentLen)
 				{
 					currentLen = topoDistance + lastLen;
 // #ifdef PRINTLENS
-					lastPos = lastMinmerPos[neighbors[i].first];
+					lastPos = lastMinmerSeqPos[neighbors[i].first];
 // #endif
 				}
 			}
-			lastMinmerPos[newMinmer] = seqPos;
-			lastMinmerLength[newMinmer] = currentLen;
+			lastMinmerSeqPos[graphPos] = seqPos;
+			lastMinmerMatchLen[graphPos] = currentLen;
 // #ifdef PRINTLENS
 			for (size_t i = lastPos; i < seqPos; i++)
 			{
@@ -223,7 +253,7 @@ void MinimizerGraph::align(const std::string& originalSeq) const
 			}
 // #endif
 		}
-	}
+	});
 // #ifdef PRINTLENS
 	auto timeEnd = std::chrono::system_clock::now();
 	size_t time = std::chrono::duration_cast<std::chrono::milliseconds>(timeEnd - timeStart).count();
@@ -240,4 +270,16 @@ void MinimizerGraph::align(const std::string& originalSeq) const
 		std::cerr << lens[i] << std::endl;
 	}
 // #endif
+}
+
+GraphPos::GraphPos(int node, size_t pos, bool reverse) :
+node(node),
+pos(pos),
+reverse(reverse)
+{
+}
+
+bool GraphPos::operator==(const GraphPos& other) const
+{
+	return node == other.node && pos == other.pos && reverse == other.reverse;
 }
