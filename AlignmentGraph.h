@@ -61,6 +61,7 @@ private:
 	friend class GraphAlignerVGAlignment;
 	template <typename LengthType, typename ScoreType, typename Word>
 	friend class GraphAlignerBitvectorBanded;
+	friend class MinimizerGraph;
 };
 
 

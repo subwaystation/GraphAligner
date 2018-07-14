@@ -289,7 +289,7 @@ void alignReads(AlignerParams params)
 		readPointers.push_back(&(fastqs[i]));
 	}
 
-	// auto alignmentGraph = getGraph(params.graphFile);
+	auto alignmentGraph = getGraph(params.graphFile);
 
 	std::vector<std::thread> threads;
 
@@ -305,7 +305,7 @@ void alignReads(AlignerParams params)
 
 	std::cout << "Build minimizer graph" << std::endl;
 	
-	auto minimizerGraph = MinimizerGraph(7, 7, GfaGraph::LoadFromFile(params.graphFile));
+	auto minimizerGraph = MinimizerGraph(4, 4, alignmentGraph);
 
 	std::cout << "Align" << std::endl;
 
