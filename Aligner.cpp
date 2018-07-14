@@ -13,6 +13,7 @@
 #include "BigraphToDigraph.h"
 #include "ThreadReadAssertion.h"
 #include "GraphAlignerWrapper.h"
+#include "MinimizerGraph.h"
 
 bool is_file_exist(std::string fileName)
 {
@@ -288,7 +289,7 @@ void alignReads(AlignerParams params)
 		readPointers.push_back(&(fastqs[i]));
 	}
 
-	auto alignmentGraph = getGraph(params.graphFile);
+	// auto alignmentGraph = getGraph(params.graphFile);
 
 	std::vector<std::thread> threads;
 
@@ -302,16 +303,26 @@ void alignReads(AlignerParams params)
 	bool hasMergedAlignmentOut = params.outputAlignmentFile != "";
 	resultsPerThread.resize(params.numThreads);
 
+	std::cout << "Build minimizer graph" << std::endl;
+	
+	auto minimizerGraph = MinimizerGraph(7, 7, GfaGraph::LoadFromFile(params.graphFile));
+
 	std::cout << "Align" << std::endl;
-	for (int i = 0; i < params.numThreads; i++)
+
+	for (auto read : fastqs)
 	{
-		threads.emplace_back([&alignmentGraph, &readPointers, &readMutex, i, seedHitsToThreads, params, &numAlnsPerThread, &resultsPerThread, hasMergedAlignmentOut]() { runComponentMappings(alignmentGraph, readPointers, readMutex, i, seedHitsToThreads, params, numAlnsPerThread[i], resultsPerThread[i], hasMergedAlignmentOut); });
+		minimizerGraph.align(read.sequence);
 	}
 
-	for (int i = 0; i < params.numThreads; i++)
-	{
-		threads[i].join();
-	}
+	// for (int i = 0; i < params.numThreads; i++)
+	// {
+	// 	threads.emplace_back([&alignmentGraph, &readPointers, &readMutex, i, seedHitsToThreads, params, &numAlnsPerThread, &resultsPerThread, hasMergedAlignmentOut]() { runComponentMappings(alignmentGraph, readPointers, readMutex, i, seedHitsToThreads, params, numAlnsPerThread[i], resultsPerThread[i], hasMergedAlignmentOut); });
+	// }
+
+	// for (int i = 0; i < params.numThreads; i++)
+	// {
+	// 	threads[i].join();
+	// }
 	assertSetRead("Postprocessing", "No seed");
 
 	size_t numAlignments = 0;
