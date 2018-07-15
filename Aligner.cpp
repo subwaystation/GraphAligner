@@ -305,7 +305,7 @@ void alignReads(AlignerParams params)
 
 	std::cout << "Build minimizer graph" << std::endl;
 	
-	auto minimizerGraph = MinimizerGraph(4, 4, alignmentGraph);
+	auto minimizerGraph = MinimizerGraph(7, 10, alignmentGraph);
 
 	std::cout << "Align" << std::endl;
 

@@ -31,7 +31,7 @@ public:
 	MinimizerGraph(size_t k, size_t w, const AlignmentGraph& graph);
 	size_t minmerize(std::string kmer) const;
 	size_t nextminmer(size_t minmer, char newChar) const;
-	std::vector<std::pair<GraphPos, size_t>> inNeighbors(GraphPos minmer) const;
+	std::vector<std::pair<size_t, size_t>> inNeighbors(size_t minmer) const;
 	void align(const std::string& seq) const;
 private:
 	std::pair<size_t, size_t> findOneMinimizer(const std::string& seq) const;
@@ -47,6 +47,7 @@ private:
 			window[i] = nextminmer(window[i-1], seq[i]);
 			if (minmerCompare(window[i], window[smallestPos])) smallestPos = i;
 		}
+		assert(minmerOrdering[window[smallestPos]] != std::numeric_limits<size_t>::max());
 		f(window[smallestPos], k + smallestPos - 1);
 		for (size_t seqPos = k+w; seqPos < seq.size(); seqPos++)
 		{
@@ -55,6 +56,7 @@ private:
 			window[windowpos] = newMinmer;
 			if (smallestPos == windowpos)
 			{
+				assert(minmerOrdering[newMinmer] != std::numeric_limits<size_t>::max());
 				f(newMinmer, seqPos);
 				for (size_t i = 0; i < w; i++)
 				{
@@ -63,6 +65,7 @@ private:
 			}
 			else if (minmerCompare(newMinmer, window[smallestPos]))
 			{
+				assert(minmerOrdering[newMinmer] != std::numeric_limits<size_t>::max());
 				f(newMinmer, seqPos);
 			}
 		}

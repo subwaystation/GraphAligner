@@ -6,8 +6,9 @@
 #include "ThreadReadAssertion.h"
 #include "CommonUtils.h"
 
-constexpr int MAX_GRAPH_TOPO_DISTANCE = 32;
-constexpr int MAX_SEQ_MINMER_DISTANCE = 32;
+constexpr int MAX_GRAPH_TOPO_DISTANCE = 128;
+constexpr int MAX_SEQ_MINMER_DISTANCE = 128;
+constexpr int SEQ_DIST_MODE_CUTOFF = 32;
 
 size_t charNum(char c)
 {
@@ -208,7 +209,7 @@ void MinimizerGraph::initTopology(const AlignmentGraph& graph)
 			assert(posStack.size() == 0);
 			assert(kmerStack.size() == 0);
 		}
-		if (processed % 1000 == 0) std::cerr << "node " << processed << "/" << graph.nodeStart.size() << " minmers " << minmers.size() << " est " << (graph.nodeStart.size() * minmers.size()) / (processed+1) << std::endl;
+		if (processed % 10000 == 0) std::cerr << "node " << processed << "/" << graph.nodeStart.size() << " minmers " << minmers.size() << " est " << (graph.nodeStart.size() * minmers.size()) / (processed+1) << std::endl;
 		processed++;
 	}
 	topology.resize(minmers.size());
@@ -230,16 +231,30 @@ void MinimizerGraph::initTopology(const AlignmentGraph& graph)
 				initTopoRec(minmerIndex, pos.first-1, 1, endPositions, graph);
 			}
 		}
-		if (processed % 1000 == 0) std::cerr << "init topo " << processed << "/" << endPositions.size() << std::endl;
+		if (processed % 100000 == 0) std::cerr << "init topo " << processed << "/" << endPositions.size() << std::endl;
 		processed++;
 	}
 	processed = 0;
 	for (size_t i = 0; i < minmers.size(); i++)
 	{
 		expandTopoRec(i, i, 0);
-		if (processed % 1000 == 0) std::cerr << "expand topo " << processed << "/" << minmers.size() << std::endl;
+		if (processed % 100000 == 0) std::cerr << "expand topo " << processed << "/" << minmers.size() << std::endl;
 		processed++;
 	}
+	std::cerr << "topo finished" << std::endl;
+	std::cerr << "number of minimizers: " << minmers.size() << std::endl;
+	size_t uniqueMinmers = 0;
+	for (size_t i = 0; i < minmerIndex.size(); i++)
+	{
+		if (minmerIndex[i].size() > 0) uniqueMinmers++;
+	}
+	std::cerr << "unique minmers: " << uniqueMinmers << std::endl;
+	size_t numEdges = 0;
+	for (size_t i = 0; i < topology.size(); i++)
+	{
+		numEdges += topology[i].size();
+	}
+	std::cerr << "number of edges: " << numEdges << std::endl;
 }
 
 size_t MinimizerGraph::minmerize(std::string kmer) const
@@ -262,94 +277,84 @@ size_t MinimizerGraph::nextminmer(size_t minmer, char newChar) const
 	return minmer;
 }
 
-std::vector<std::pair<GraphPos, size_t>> MinimizerGraph::inNeighbors(GraphPos minmer) const
+std::vector<std::pair<size_t, size_t>> MinimizerGraph::inNeighbors(size_t index) const
 {
-	std::vector<std::pair<GraphPos, size_t>> result;
-	// for (auto mm : minmersPerEdgeGroup[minmer.node])
-	// {
-	// 	if (mm.pos < minmer.pos) result.emplace_back(mm, minmer.pos - mm.pos);
-	// }
-	// for (auto predecessor : topology[minmer.node])
-	// {
-	// 	for (auto mm : minmersPerEdgeGroup[predecessor.first])
-	// 	{
-	// 		if (mm.pos < minmer.pos + predecessor.second) result.emplace_back(mm, minmer.pos + predecessor.second - mm.pos);
-	// 	}
-	// }
-	return result;
+	return topology[index];
 }
 
 void MinimizerGraph::align(const std::string& originalSeq) const
-{}
-
-// void MinimizerGraph::align(const std::string& originalSeq) const
-// {
-// 	// std::string seq = getHPC(originalSeq);
-// 	std::string seq = originalSeq;
-// 	assert(seq.size() > k + w);
-// // #ifdef PRINTLENS
-// 	auto timeStart = std::chrono::system_clock::now();
-// 	std::vector<size_t> lens;
-// 	lens.resize(seq.size(), 0);
-// // #endif
-// 	std::unordered_map<GraphPos, size_t> lastMinmerSeqPos;
-// 	std::unordered_map<GraphPos, size_t> lastMinmerMatchLen;
-// 	doForMinimizers(seq, [this, &lens, &lastMinmerSeqPos, &lastMinmerMatchLen](size_t minimizer, size_t seqPos)
-// 	{
-// 		for (auto graphPos : minmerIndex[minimizer])
-// 		{
-// 			auto neighbors = inNeighbors(graphPos);
-// 			size_t currentLen = 0;
-// // #ifdef PRINTLENS
-// 			size_t lastPos = 0;
-// // #endif
-// 			for (size_t i = 0; i < neighbors.size(); i++)
-// 			{
-// 				size_t lastLen = lastMinmerMatchLen[neighbors[i].first];
-// 				int seqDist = seqPos - lastMinmerSeqPos[neighbors[i].first];
-// 				int topoDistance = neighbors[i].second;
-// 				// assert(topoDistance <= k+w);
-// 				bool valid = true;
-// 				if (seqDist > 32 || topoDistance > 32)
-// 				{
-// 					if (seqDist < topoDistance * 0.6 || seqDist > topoDistance / 0.6) valid = false;
-// 				}
-// 				// if (seqDist > MAX_SEQ_MINMER_DISTANCE) valid = false;
-// 				if (valid && topoDistance + lastLen > currentLen)
-// 				{
-// 					currentLen = topoDistance + lastLen;
-// // #ifdef PRINTLENS
-// 					lastPos = lastMinmerSeqPos[neighbors[i].first];
-// // #endif
-// 				}
-// 			}
-// 			lastMinmerSeqPos[graphPos] = seqPos;
-// 			lastMinmerMatchLen[graphPos] = currentLen;
-// // #ifdef PRINTLENS
-// 			for (size_t i = lastPos; i < seqPos; i++)
-// 			{
-// 				lens[i] = std::max(lens[i], currentLen);
-// 			}
-// // #endif
-// 		}
-// 	});
-// // #ifdef PRINTLENS
-// 	auto timeEnd = std::chrono::system_clock::now();
-// 	size_t time = std::chrono::duration_cast<std::chrono::milliseconds>(timeEnd - timeStart).count();
-// 	std::cerr << "time: " << time << std::endl;
-// 	size_t maxlen = 0;
-// 	for (size_t i = 0; i < lens.size(); i++)
-// 	{
-// 		maxlen = std::max(maxlen, lens[i]);
-// 	}
-// 	std::cerr << "maxlen: " << maxlen << std::endl;
-// 	std::cerr << "lens: " << std::endl;
-// 	for (size_t i = 0; i < lens.size(); i++)
-// 	{
-// 		std::cerr << lens[i] << std::endl;
-// 	}
-// // #endif
-// }
+{
+	std::cerr << "align" << std::endl;
+	// std::string seq = getHPC(originalSeq);
+	std::string seq = originalSeq;
+	assert(seq.size() > k + w);
+// #ifdef PRINTLENS
+	auto timeStart = std::chrono::system_clock::now();
+	std::vector<size_t> lens;
+	lens.resize(seq.size(), 0);
+// #endif
+	std::vector<size_t> lastMinmerSeqPos;
+	std::vector<size_t> lastMinmerMatchLen;
+	lastMinmerSeqPos.resize(minmers.size(), 0);
+	lastMinmerMatchLen.resize(minmers.size(), 0);
+	size_t lastprint = 0;
+	doForMinimizers(seq, [this, &seq, &lens, &lastMinmerSeqPos, &lastMinmerMatchLen](size_t minimizer, size_t seqPos)
+	{
+		for (auto graphPos : minmerIndex[minimizer])
+		{
+			auto neighbors = inNeighbors(graphPos);
+			size_t currentLen = 0;
+// #ifdef PRINTLENS
+			size_t lastPos = 0;
+// #endif
+			for (size_t i = 0; i < neighbors.size(); i++)
+			{
+				size_t lastLen = lastMinmerMatchLen[neighbors[i].first];
+				int seqDist = seqPos - lastMinmerSeqPos[neighbors[i].first];
+				int topoDistance = neighbors[i].second;
+				// assert(topoDistance <= k+w);
+				bool valid = true;
+				if (seqDist > SEQ_DIST_MODE_CUTOFF || topoDistance > SEQ_DIST_MODE_CUTOFF)
+				{
+					if (seqDist < topoDistance * 0.6 || seqDist > topoDistance / 0.6) valid = false;
+				}
+				// if (seqDist > MAX_SEQ_MINMER_DISTANCE) valid = false;
+				if (valid && topoDistance + lastLen > currentLen)
+				{
+					currentLen = topoDistance + lastLen;
+// #ifdef PRINTLENS
+					lastPos = lastMinmerSeqPos[neighbors[i].first];
+// #endif
+				}
+			}
+			lastMinmerSeqPos[graphPos] = seqPos;
+			lastMinmerMatchLen[graphPos] = currentLen;
+// #ifdef PRINTLENS
+			for (size_t i = lastPos; i < seqPos; i++)
+			{
+				lens[i] = std::max(lens[i], currentLen);
+			}
+// #endif
+		}
+		std::cerr << "align " << seqPos << "/" << seq.size() << " matches " << minmerIndex[minimizer].size() << std::endl;
+	});
+// #ifdef PRINTLENS
+	auto timeEnd = std::chrono::system_clock::now();
+	size_t time = std::chrono::duration_cast<std::chrono::milliseconds>(timeEnd - timeStart).count();
+	std::cerr << "time: " << time << std::endl;
+	size_t maxlen = 0;
+	for (size_t i = 0; i < lens.size(); i++)
+	{
+		maxlen = std::max(maxlen, lens[i]);
+	}
+	std::cerr << "maxlen: " << maxlen << std::endl;
+	std::cerr << "lens: " << std::endl;
+	for (size_t i = 0; i < lens.size(); i++)
+	{
+		std::cerr << lens[i] << std::endl;
+	}
+// #endif
+}
 
 std::pair<size_t, size_t> MinimizerGraph::findOneMinimizer(const std::string& seq) const
 {
@@ -365,6 +370,7 @@ std::pair<size_t, size_t> MinimizerGraph::findOneMinimizer(const std::string& se
 			pos = i;
 		}
 	}
+	assert(minmerOrdering[smallest] != std::numeric_limits<size_t>::max());
 	return std::make_pair(smallest, pos);
 }
 
