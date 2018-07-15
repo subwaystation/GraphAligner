@@ -242,6 +242,7 @@ void MinimizerGraph::initTopology(const AlignmentGraph& graph)
 		processed++;
 	}
 	std::cerr << "topo finished" << std::endl;
+	std::cerr << "k: " << k << " w: " << w << std::endl;
 	std::cerr << "number of minimizers: " << minmers.size() << std::endl;
 	size_t uniqueMinmers = 0;
 	for (size_t i = 0; i < minmerIndex.size(); i++)
