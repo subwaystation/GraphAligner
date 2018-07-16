@@ -9,7 +9,7 @@
 
 constexpr int MAX_GRAPH_TOPO_DISTANCE = 15;
 constexpr int MAX_SEQ_MINMER_DISTANCE = 15;
-// constexpr int SEQ_DIST_MODE_CUTOFF = 32;
+constexpr int SEQ_DIST_MODE_CUTOFF = 32;
 constexpr int MAX_TREE_DEPTH = 20;
 constexpr int MAX_TREE_PATH_LENGTH = 256;
 
@@ -47,7 +47,8 @@ std::string getHPC(const std::string& str)
 
 MinimizerGraph::MinimizerGraph(size_t k, size_t w, const AlignmentGraph& graph) :
 k(k),
-w(w)
+w(w),
+graph(graph)
 {
 	assert(k < w);
 	assert(k < sizeof(size_t) * 8 / 2);
@@ -58,15 +59,25 @@ w(w)
 	}
 	if (!tryLoadTopology("index.topo.tmi"))
 	{
-		initTopology(graph);
+		initTopology();
 		storeTopology("index.topo.tmi");
 	}
-	if (!tryLoadTree("index.tree.tmi"))
-	{
-		initTree();
-		storeTree("index.tree.tmi");
-	}
+	// if (!tryLoadTree("index.tree.tmi"))
+	// {
+	// 	initTree();
+	// 	storeTree("index.tree.tmi");
+	// }
 }
+
+void save(std::ofstream& file, size_t value);
+template <typename T, typename U> void save(std::ofstream& file, std::pair<T, U> value);
+template <typename T> void save(std::ofstream& file, const std::vector<T>& value);
+template <typename T, typename U> void save(std::ofstream& file, const std::unordered_map<T, U>& value);
+
+void load(std::ifstream& file, size_t& value);
+template <typename T, typename U> void load(std::ifstream& file, std::pair<T, U>& value);
+template <typename T> void load(std::ifstream& file, std::vector<T>& value);
+template <typename T, typename U> void load(std::ifstream& file, std::unordered_map<T, U>& value);
 
 void save(std::ofstream& file, size_t value)
 {
@@ -92,6 +103,19 @@ void load(std::ifstream& file, std::pair<T, U>& result)
 	load(file, result.second);
 }
 
+template <typename T>
+void load(std::ifstream& file, std::vector<T>& result)
+{
+	size_t count = 0;
+	file >> count;
+	for (size_t i = 0; i < count; i++)
+	{
+		T item;
+		load(file, item);
+		result.push_back(item);
+	}
+}
+
 template <typename T, typename U>
 void load(std::ifstream& file, std::unordered_map<T, U>& result)
 {
@@ -108,15 +132,12 @@ void load(std::ifstream& file, std::unordered_map<T, U>& result)
 }
 
 template <typename T>
-void load(std::ifstream& file, std::vector<T>& result)
+void save(std::ofstream& file, const std::vector<T>& vec)
 {
-	size_t count = 0;
-	file >> count;
-	for (size_t i = 0; i < count; i++)
+	file << vec.size() << " ";
+	for (size_t i = 0; i < vec.size(); i++)
 	{
-		T item;
-		load(file, item);
-		result.push_back(item);
+		save(file, vec[i]);
 	}
 }
 
@@ -128,16 +149,6 @@ void save(std::ofstream& file, const std::unordered_map<T, U>& map)
 	{
 		save(file, pair.first);
 		save(file, pair.second);
-	}
-}
-
-template <typename T>
-void save(std::ofstream& file, const std::vector<T>& vec)
-{
-	file << vec.size() << " ";
-	for (size_t i = 0; i < vec.size(); i++)
-	{
-		save(file, vec[i]);
 	}
 }
 
@@ -159,7 +170,9 @@ void MinimizerGraph::storeTopology(std::string filename)
 	std::ofstream file {filename};
 	save(file, minmers);
 	save(file, minmerIndex);
+	save(file, minmerPosition);
 	save(file, topology);
+	save(file, reverseTopology);
 }
 
 bool MinimizerGraph::tryLoadTopology(std::string filename)
@@ -167,7 +180,9 @@ bool MinimizerGraph::tryLoadTopology(std::string filename)
 	std::ifstream file {filename};
 	load(file, minmers);
 	load(file, minmerIndex);
+	load(file, minmerPosition);
 	load(file, topology);
+	load(file, reverseTopology);
 	return file.good();
 }
 
@@ -177,6 +192,7 @@ void MinimizerGraph::storeTree(std::string filename)
 	save(file, tree.nodeLabels);
 	save(file, tree.children);
 	save(file, tree.nodeDepths);
+	save(file, tree.leafMinmers);
 }
 
 bool MinimizerGraph::tryLoadTree(std::string filename)
@@ -185,6 +201,7 @@ bool MinimizerGraph::tryLoadTree(std::string filename)
 	load(file, tree.nodeLabels);
 	load(file, tree.children);
 	load(file, tree.nodeDepths);
+	load(file, tree.leafMinmers);
 	return file.good();
 }
 
@@ -195,7 +212,7 @@ void MinimizerGraph::buildTreeRec(size_t parent, const std::vector<std::pair<siz
 	{
 		size_t minmer = uniqueMinmers[i];
 		std::vector<std::pair<size_t, size_t>> nextActives;
-		std::vector<size_t> leafMinmers;
+		std::vector<std::pair<size_t, size_t>> leafMinmers;
 		for (auto index : activeIndices)
 		{
 			if (reverseTopology[index.first].count(minmer) == 0) continue;
@@ -208,7 +225,7 @@ void MinimizerGraph::buildTreeRec(size_t parent, const std::vector<std::pair<siz
 				}
 				else
 				{
-					leafMinmers.emplace_back(index.first);
+					leafMinmers.emplace_back(index.first, length);
 				}
 			}
 		}
@@ -223,7 +240,7 @@ void MinimizerGraph::buildTreeRec(size_t parent, const std::vector<std::pair<siz
 
 		if (nextActives.size() == 1)
 		{
-			tree.leafMinmers.back().push_back(nextActives[0].first);
+			tree.leafMinmers.back().emplace_back(nextActives[0].first, nextActives[0].second);
 			continue;
 		}
 		if (nextActives.size() == 0) continue;
@@ -282,7 +299,7 @@ void MinimizerGraph::initTree()
 	}
 }
 
-void MinimizerGraph::getTotalPathsRec(size_t node, std::vector<size_t>& totalPathsPerNode)
+void MinimizerGraph::getTotalPathsRec(size_t node, std::vector<size_t>& totalPathsPerNode) const
 {
 	totalPathsPerNode[node] += tree.leafMinmers[node].size();
 	for (auto child : tree.children[node])
@@ -360,9 +377,10 @@ void MinimizerGraph::addMinmerIfUnique(const std::vector<size_t>& posStack, size
 	endPositions[posStack[pos]].push_back(minmers.size());
 	minmerIndex[minmer].push_back(minmers.size());
 	minmers.push_back(minmer);
+	minmerPosition.push_back(posStack[pos]);
 }
 
-void MinimizerGraph::addMinmersRec(size_t pos, std::string& currentMer, std::vector<size_t>& posStack, std::unordered_map<size_t, std::vector<size_t>>& endPositions, const AlignmentGraph& graph)
+void MinimizerGraph::addMinmersRec(size_t pos, std::string& currentMer, std::vector<size_t>& posStack, std::unordered_map<size_t, std::vector<size_t>>& endPositions)
 {
 	assert(posStack.size() == currentMer.size());
 	posStack.push_back(pos);
@@ -372,19 +390,31 @@ void MinimizerGraph::addMinmersRec(size_t pos, std::string& currentMer, std::vec
 		assert(posStack.size() == currentMer.size());
 		assert(posStack.size() == w);
 		auto found = findOneMinimizer(currentMer);
-		addMinmerIfUnique(posStack, found.first, found.second, endPositions);
+		std::string foundMinmer;
+		for (size_t i = 0; i < k; i++)
+		{
+			foundMinmer += "ACGT"[(found.first >> (i*2)) % 4];
+		}
+		for (size_t i = 0; i < currentMer.size() - foundMinmer.size() + 1; i++)
+		{
+			assert((i+k-1) != found.second || currentMer.substr(i, k) == foundMinmer);
+			if (currentMer.substr(i, k) == foundMinmer)
+			{
+				addMinmerIfUnique(posStack, found.first, i + k - 1, endPositions);
+			}
+		}
 	}
 	else
 	{
 		if (pos < graph.NodeEnd(graph.IndexToNode(pos))-1)
 		{
-			addMinmersRec(pos+1, currentMer, posStack, endPositions, graph);
+			addMinmersRec(pos+1, currentMer, posStack, endPositions);
 		}
 		else
 		{
 			for (auto neighbor : graph.outNeighbors[graph.IndexToNode(pos)])
 			{
-				addMinmersRec(graph.NodeStart(neighbor), currentMer, posStack, endPositions, graph);
+				addMinmersRec(graph.NodeStart(neighbor), currentMer, posStack, endPositions);
 			}
 		}
 	}
@@ -392,7 +422,7 @@ void MinimizerGraph::addMinmersRec(size_t pos, std::string& currentMer, std::vec
 	posStack.pop_back();
 }
 
-void MinimizerGraph::initTopoRec(size_t minmerIndex, size_t pos, size_t len, const std::unordered_map<size_t, std::vector<size_t>>& endPositions, const AlignmentGraph& graph)
+void MinimizerGraph::initTopoRec(size_t minmerPos, size_t pos, size_t len, const std::unordered_map<size_t, std::vector<size_t>>& endPositions)
 {
 	assert(len < (k + w) * 2);
 	if (endPositions.count(pos) == 1)
@@ -400,7 +430,7 @@ void MinimizerGraph::initTopoRec(size_t minmerIndex, size_t pos, size_t len, con
 		assert(endPositions.at(pos).size() > 0);
 		for (auto previousIndex : endPositions.at(pos))
 		{
-			addUnique(topology[minmerIndex], previousIndex, len);
+			addUnique(topology[minmerPos], previousIndex, len);
 		}
 	}
 	else
@@ -409,12 +439,12 @@ void MinimizerGraph::initTopoRec(size_t minmerIndex, size_t pos, size_t len, con
 		{
 			for (auto neighbor : graph.inNeighbors[graph.IndexToNode(pos)])
 			{
-				initTopoRec(minmerIndex, graph.NodeEnd(neighbor)-1, len+1, endPositions, graph);
+				initTopoRec(minmerPos, graph.NodeEnd(neighbor)-1, len+1, endPositions);
 			}
 		}
 		else
 		{
-			initTopoRec(minmerIndex, pos-1, len+1, endPositions, graph);
+			initTopoRec(minmerPos, pos-1, len+1, endPositions);
 		}
 	}
 }
@@ -434,7 +464,153 @@ void MinimizerGraph::expandTopoRec(size_t start, size_t current, size_t len)
 	}
 }
 
-void MinimizerGraph::initTopology(const AlignmentGraph& graph)
+bool MinimizerGraph::checkMinmerExistsRec(const std::string& minmer, size_t pos, size_t minmerPos) const
+{
+	if (graph.NodeSequences(pos) != minmer[minmerPos]) return false;
+	if (minmerPos == 0) return true;
+	if (pos == graph.NodeStart(graph.IndexToNode(pos)))
+	{
+		for (auto neighbor : graph.inNeighbors[graph.IndexToNode(pos)])
+		{
+			if (checkMinmerExistsRec(minmer, graph.NodeEnd(neighbor)-1, minmerPos-1)) return true;
+		}
+		return false;
+	}
+	else
+	{
+		return checkMinmerExistsRec(minmer, pos-1, minmerPos-1);
+	}
+}
+
+void MinimizerGraph::verifyMinmerPositions(const std::unordered_map<size_t, std::vector<size_t>>& endPositions) const
+{
+	size_t checked = 0;
+	for (auto position : endPositions)
+	{
+		for (size_t index : position.second)
+		{
+			checked++;
+			size_t minmerI = minmers[index];
+			std::string minmerStr;
+			for (size_t i = 0; i < k; i++)
+			{
+				minmerStr += "ACGT"[minmerI % 4];
+				minmerI >>= 2;
+			}
+			assert(checkMinmerExistsRec(minmerStr, position.first, minmerStr.size()-1));
+		}
+	}
+	assert(checked == minmers.size());
+}
+
+void MinimizerGraph::verifyDirectTopology(const std::unordered_map<size_t, std::vector<size_t>>& endPositions) const
+{
+	size_t checked = 0;
+	for (auto position : endPositions)
+	{
+		for (auto index : position.second)
+		{
+			checked++;
+			std::set<size_t> neighborsHere;
+			if (position.first == graph.NodeStart(graph.IndexToNode(position.first)))
+			{
+				for (auto neighbor : graph.inNeighbors[graph.IndexToNode(position.first)])
+				{
+					checkDirectTopologyRec(endPositions, graph.NodeEnd(neighbor)-1, MAX_GRAPH_TOPO_DISTANCE-1, neighborsHere);
+				}
+			}
+			else
+			{
+				checkDirectTopologyRec(endPositions, position.first-1, MAX_GRAPH_TOPO_DISTANCE-1, neighborsHere);
+			}
+			assert(neighborsHere.size() == topology[index].size());
+			for (auto neighbor : topology[index])
+			{
+				assert(neighborsHere.count(neighbor.first) == 1);
+			}
+		}
+	}
+	assert(checked == minmers.size());
+}
+
+void MinimizerGraph::checkDirectTopologyRec(const std::unordered_map<size_t, std::vector<size_t>>& endPositions, size_t pos, size_t lengthLeft, std::set<size_t>& foundNeighbors) const
+{
+	if (endPositions.count(pos) == 1)
+	{
+		for (auto here : endPositions.at(pos))
+		{
+			foundNeighbors.insert(here);
+		}
+		return;
+	}
+	if (lengthLeft == 0) return;
+	if (pos == graph.NodeStart(graph.IndexToNode(pos)))
+	{
+		for (auto neighbor : graph.inNeighbors[graph.IndexToNode(pos)])
+		{
+			checkDirectTopologyRec(endPositions, graph.NodeEnd(neighbor)-1, lengthLeft-1, foundNeighbors);
+		}
+	}
+	else
+	{
+		checkDirectTopologyRec(endPositions, pos-1, lengthLeft-1, foundNeighbors);
+	}
+}
+
+void MinimizerGraph::verifyExpandedTopology(const std::unordered_map<size_t, std::vector<size_t>>& endPositions) const
+{
+	size_t checked = 0;
+	for (auto position : endPositions)
+	{
+		for (auto index : position.second)
+		{
+			checked++;
+			std::set<size_t> neighborsHere;
+			if (position.first == graph.NodeStart(graph.IndexToNode(position.first)))
+			{
+				for (auto neighbor : graph.inNeighbors[graph.IndexToNode(position.first)])
+				{
+					checkExpandedTopologyRec(endPositions, graph.NodeEnd(neighbor)-1, MAX_GRAPH_TOPO_DISTANCE-1, neighborsHere);
+				}
+			}
+			else
+			{
+				checkExpandedTopologyRec(endPositions, position.first-1, MAX_GRAPH_TOPO_DISTANCE-1, neighborsHere);
+			}
+			assert(neighborsHere.size() == topology[index].size());
+			for (auto neighbor : topology[index])
+			{
+				assert(neighborsHere.count(neighbor.first) == 1);
+			}
+		}
+	}
+	assert(checked == minmers.size());
+}
+
+void MinimizerGraph::checkExpandedTopologyRec(const std::unordered_map<size_t, std::vector<size_t>>& endPositions, size_t pos, size_t lengthLeft, std::set<size_t>& foundNeighbors) const
+{
+	if (endPositions.count(pos) == 1)
+	{
+		for (auto here : endPositions.at(pos))
+		{
+			foundNeighbors.insert(here);
+		}
+	}
+	if (lengthLeft == 0) return;
+	if (pos == graph.NodeStart(graph.IndexToNode(pos)))
+	{
+		for (auto neighbor : graph.inNeighbors[graph.IndexToNode(pos)])
+		{
+			checkExpandedTopologyRec(endPositions, graph.NodeEnd(neighbor)-1, lengthLeft-1, foundNeighbors);
+		}
+	}
+	else
+	{
+		checkExpandedTopologyRec(endPositions, pos-1, lengthLeft-1, foundNeighbors);
+	}
+}
+
+void MinimizerGraph::initTopology()
 {
 	minmerIndex.resize(pow(2, k * 2));
 	std::string kmerStack;
@@ -446,13 +622,14 @@ void MinimizerGraph::initTopology(const AlignmentGraph& graph)
 	{
 		for (size_t i = graph.NodeStart(nodeIndex); i < graph.NodeEnd(nodeIndex); i++)
 		{
-			addMinmersRec(i, kmerStack, posStack, endPositions, graph);
+			addMinmersRec(i, kmerStack, posStack, endPositions);
 			assert(posStack.size() == 0);
 			assert(kmerStack.size() == 0);
 		}
 		if (processed % 10000 == 0) std::cerr << "node " << processed << "/" << graph.nodeStart.size() << " minmers " << minmers.size() << " est " << (graph.nodeStart.size() * minmers.size()) / (processed+1) << std::endl;
 		processed++;
 	}
+	verifyMinmerPositions(endPositions);
 	topology.resize(minmers.size());
 	std::cerr << "get topology" << std::endl;
 	processed = 0;
@@ -464,24 +641,29 @@ void MinimizerGraph::initTopology(const AlignmentGraph& graph)
 			{
 				for (auto neighbor : graph.inNeighbors[graph.IndexToNode(pos.first)])
 				{
-					initTopoRec(minmerIndex, graph.NodeEnd(neighbor)-1, 1, endPositions, graph);
+					initTopoRec(minmerIndex, graph.NodeEnd(neighbor)-1, 1, endPositions);
 				}
 			}
 			else
 			{
-				initTopoRec(minmerIndex, pos.first-1, 1, endPositions, graph);
+				initTopoRec(minmerIndex, pos.first-1, 1, endPositions);
 			}
 		}
 		if (processed % 100000 == 0) std::cerr << "init topo " << processed << "/" << endPositions.size() << std::endl;
 		processed++;
 	}
+	verifyDirectTopology(endPositions);
 	processed = 0;
 	for (size_t i = 0; i < minmers.size(); i++)
 	{
-		expandTopoRec(i, i, 0);
+		for (auto neighbor : topology[i])
+		{
+			expandTopoRec(i, neighbor.first, neighbor.second);
+		}
 		if (processed % 100000 == 0) std::cerr << "expand topo " << processed << "/" << minmers.size() << std::endl;
 		processed++;
 	}
+	verifyExpandedTopology(endPositions);
 	reverseTopology.resize(topology.size());
 	for (size_t i = 0; i < topology.size(); i++)
 	{
@@ -532,73 +714,59 @@ std::vector<std::pair<size_t, size_t>> MinimizerGraph::inNeighbors(size_t index)
 	return topology[index];
 }
 
-void MinimizerGraph::align(const std::string& originalSeq) const
+bool MinimizerGraph::findPath(const std::string& seq, std::vector<size_t>& posStack, const AlignmentGraph& graph) const
 {
-	std::cerr << "align" << std::endl;
-	std::string seq = originalSeq;
-	assert(seq.size() > k + w);
-// #ifdef PRINTLENS
-	auto timeStart = std::chrono::system_clock::now();
-	std::vector<size_t> lens;
-	lens.resize(seq.size(), 0);
-// #endif
-	std::vector<size_t> activeTreeNodes;
-	std::vector<size_t> activeNextTreeNodes;
-	std::vector<size_t> treeNodeLastActivePos;
-	std::vector<size_t> treeNodeLastActiveLen;
-	activeTreeNodes.push_back(0);
-	treeNodeLastActivePos.resize(tree.nodeLabels.size(), 0);
-	treeNodeLastActiveLen.resize(tree.nodeLabels.size(), 0);
-	doForMinimizers(seq, [this, &activeTreeNodes, &lens, &activeNextTreeNodes, &treeNodeLastActivePos, &treeNodeLastActiveLen](size_t minmer, size_t seqPos)
+	if (posStack.size() == seq.size()) return true;
+	if (graph.NodeSequences(posStack.back()) != seq[posStack.size()-1]) return false;
+	size_t node = graph.IndexToNode(posStack.back());
+	if (posStack.back() == graph.NodeEnd(node)-1)
 	{
-		assert(activeTreeNodes.size() > 0);
-		assert(activeTreeNodes[0] == 0);
-		treeNodeLastActivePos[0] = seqPos;
-		activeNextTreeNodes.push_back(0);
-		// std::cerr << "pos " << seqPos << " actives " << activeTreeNodes.size() << " minimizers " << minmerIndex[minmer].size();
-		// if (tree.children[0].count(minmer) == 0) std::cerr << " NOT IN THE ROOT!";
-		// std::cerr << std::endl;
-		for (auto node : activeTreeNodes)
+		for (auto neighbor : graph.outNeighbors[node])
 		{
-			assert(seqPos >= treeNodeLastActivePos[node]);
-			if (seqPos - treeNodeLastActivePos[node] > MAX_SEQ_MINMER_DISTANCE) continue;
-			auto found = tree.children[node].find(minmer);
-			if (found == tree.children[node].end()) continue;
-			activeNextTreeNodes.push_back(found->second);
-			treeNodeLastActivePos[found->second] = seqPos;
-			treeNodeLastActiveLen[found->second] = treeNodeLastActiveLen[node] + 1;
-// #ifdef PRINTLENS
-			for (size_t i = treeNodeLastActivePos[node]; i <= seqPos; i++)
-			{
-				lens[i] = std::max(lens[i], treeNodeLastActiveLen[found->second]);
-			}
-// #endif
+			posStack.push_back(graph.NodeStart(neighbor));
+			if (findPath(seq, posStack, graph)) return true;
+			posStack.pop_back();
 		}
-		std::swap(activeTreeNodes, activeNextTreeNodes);
-		activeNextTreeNodes.clear();
-	});
-// #ifdef PRINTLENS
-	auto timeEnd = std::chrono::system_clock::now();
-	size_t time = std::chrono::duration_cast<std::chrono::milliseconds>(timeEnd - timeStart).count();
-	std::cerr << "time: " << time << std::endl;
-	size_t maxlen = 0;
-	for (size_t i = 0; i < lens.size(); i++)
-	{
-		maxlen = std::max(maxlen, lens[i]);
+		return false;
 	}
-	std::cerr << "maxlen: " << maxlen << std::endl;
-	std::cerr << "lens: " << std::endl;
-	for (size_t i = 0; i < lens.size(); i++)
+	else
 	{
-		std::cerr << lens[i] << std::endl;
+		posStack.push_back(posStack.back()+1);
+		bool result = findPath(seq, posStack, graph);
+		if (!result) posStack.pop_back();
+		return result;
 	}
-// #endif
 }
 
 // void MinimizerGraph::align(const std::string& originalSeq) const
 // {
+// 	std::vector<size_t> posInGraph;
+// 	posInGraph.reserve(originalSeq.size());
+// 	posInGraph.push_back(graph.NodeStart(graph.nodeLookup.at(246)[0]));
+// 	assert(findPath(originalSeq, posInGraph, graph));
+// 	assert(posInGraph.size() == originalSeq.size());
+// 	for (size_t i = 0; i < originalSeq.size(); i++)
+// 	{
+// 		assert(graph.NodeSequences(posInGraph[i]) == originalSeq[i]);
+// 	}
+// 	doForMinimizers(originalSeq, [this, &posInGraph](size_t minmer, size_t pos)
+// 	{
+// 		bool found = false;
+// 		for (auto index : minmerIndex[minmer])
+// 		{
+// 			if (minmerPosition[index] == posInGraph[pos])
+// 			{
+// 				found = true;
+// 				break;
+// 			}
+// 		}
+// 		assert(found);
+// 	});
+// }
+
+// void MinimizerGraph::align(const std::string& originalSeq) const
+// {
 // 	std::cerr << "align" << std::endl;
-// 	// std::string seq = getHPC(originalSeq);
 // 	std::string seq = originalSeq;
 // 	assert(seq.size() > k + w);
 // // #ifdef PRINTLENS
@@ -606,50 +774,66 @@ void MinimizerGraph::align(const std::string& originalSeq) const
 // 	std::vector<size_t> lens;
 // 	lens.resize(seq.size(), 0);
 // // #endif
-// 	std::vector<size_t> lastMinmerSeqPos;
-// 	std::vector<size_t> lastMinmerMatchLen;
-// 	lastMinmerSeqPos.resize(minmers.size(), 0);
-// 	lastMinmerMatchLen.resize(minmers.size(), 0);
-// 	size_t lastprint = 0;
-// 	doForMinimizers(seq, [this, &seq, &lens, &lastMinmerSeqPos, &lastMinmerMatchLen](size_t minimizer, size_t seqPos)
+// 	std::vector<size_t> activeTreeNodes;
+// 	std::vector<size_t> activeNextTreeNodes;
+// 	std::vector<size_t> treeNodeLastActivePos;
+// 	std::vector<size_t> treeNodeLastActiveLen;
+// 	std::vector<std::tuple<size_t, size_t, size_t>> activePathMinmers;
+// 	std::vector<std::tuple<size_t, size_t, size_t>> nextActivePathMinmers;
+// 	activeTreeNodes.push_back(0);
+// 	treeNodeLastActivePos.resize(tree.nodeLabels.size(), 0);
+// 	treeNodeLastActiveLen.resize(tree.nodeLabels.size(), 0);
+// 	doForMinimizers(seq, [this, &activePathMinmers, &nextActivePathMinmers, &activeTreeNodes, &lens, &activeNextTreeNodes, &treeNodeLastActivePos, &treeNodeLastActiveLen](size_t minmer, size_t seqPos)
 // 	{
-// 		for (auto graphPos : minmerIndex[minimizer])
+// 		assert(activeTreeNodes.size() > 0);
+// 		assert(activeTreeNodes[0] == 0);
+// 		treeNodeLastActivePos[0] = seqPos;
+// 		activeNextTreeNodes.push_back(0);
+// 		std::cerr << "pos " << seqPos << " treeactives " << activeTreeNodes.size() << " minimizeractives " << activePathMinmers.size() << " minimizers " << minmerIndex[minmer].size() << std::endl;
+// 		for (auto pathMinmer : activePathMinmers)
 // 		{
-// 			auto neighbors = inNeighbors(graphPos);
-// 			size_t currentLen = 0;
-// // #ifdef PRINTLENS
-// 			size_t lastPos = 0;
-// // #endif
-// 			for (size_t i = 0; i < neighbors.size(); i++)
+// 			size_t index = std::get<0>(pathMinmer);
+// 			size_t length = std::get<1>(pathMinmer);
+// 			size_t position = std::get<2>(pathMinmer);
+// 			if (seqPos - position > MAX_SEQ_MINMER_DISTANCE) continue;
+// 			nextActivePathMinmers.emplace_back(index, length, position);
+// 			auto found = reverseTopology[index].find(minmer);
+// 			if (found == reverseTopology[index].end()) continue;
+// 			for (auto neighbor : found->second)
 // 			{
-// 				size_t lastLen = lastMinmerMatchLen[neighbors[i].first];
-// 				int seqDist = seqPos - lastMinmerSeqPos[neighbors[i].first];
-// 				int topoDistance = neighbors[i].second;
-// 				// assert(topoDistance <= k+w);
-// 				bool valid = true;
-// 				if (seqDist > SEQ_DIST_MODE_CUTOFF || topoDistance > SEQ_DIST_MODE_CUTOFF)
-// 				{
-// 					if (seqDist < topoDistance * 0.6 || seqDist > topoDistance / 0.6) valid = false;
-// 				}
-// 				// if (seqDist > MAX_SEQ_MINMER_DISTANCE) valid = false;
-// 				if (valid && topoDistance + lastLen > currentLen)
-// 				{
-// 					currentLen = topoDistance + lastLen;
+// 				nextActivePathMinmers.emplace_back(neighbor.first, length + neighbor.second, seqPos);
 // // #ifdef PRINTLENS
-// 					lastPos = lastMinmerSeqPos[neighbors[i].first];
-// // #endif
+// 				for (size_t i = position; i <= seqPos; i++)
+// 				{
+// 					lens[i] = std::max(lens[i], length + neighbor.second);
 // 				}
-// 			}
-// 			lastMinmerSeqPos[graphPos] = seqPos;
-// 			lastMinmerMatchLen[graphPos] = currentLen;
-// // #ifdef PRINTLENS
-// 			for (size_t i = lastPos; i < seqPos; i++)
-// 			{
-// 				lens[i] = std::max(lens[i], currentLen);
-// 			}
 // // #endif
+// 			}
 // 		}
-// 		std::cerr << "align " << seqPos << "/" << seq.size() << " matches " << minmerIndex[minimizer].size() << std::endl;
+// 		std::swap(activePathMinmers, nextActivePathMinmers);
+// 		nextActivePathMinmers.clear();
+// 		for (auto node : activeTreeNodes)
+// 		{
+// 			assert(seqPos >= treeNodeLastActivePos[node]);
+// 			if (seqPos - treeNodeLastActivePos[node] > MAX_SEQ_MINMER_DISTANCE) continue;
+// 			for (auto leaf : tree.leafMinmers[node])
+// 			{
+// 				activePathMinmers.emplace_back(leaf.first, leaf.second, seqPos);
+// 			}
+// 			auto found = tree.children[node].find(minmer);
+// 			if (found == tree.children[node].end()) continue;
+// 			activeNextTreeNodes.push_back(found->second);
+// 			treeNodeLastActivePos[found->second] = seqPos;
+// 			treeNodeLastActiveLen[found->second] = treeNodeLastActiveLen[node] + 1;
+// // // #ifdef PRINTLENS
+// // 			for (size_t i = treeNodeLastActivePos[node]; i <= seqPos; i++)
+// // 			{
+// // 				lens[i] = std::max(lens[i], treeNodeLastActiveLen[found->second]);
+// // 			}
+// // // #endif
+// 		}
+// 		std::swap(activeTreeNodes, activeNextTreeNodes);
+// 		activeNextTreeNodes.clear();
 // 	});
 // // #ifdef PRINTLENS
 // 	auto timeEnd = std::chrono::system_clock::now();
@@ -668,6 +852,80 @@ void MinimizerGraph::align(const std::string& originalSeq) const
 // 	}
 // // #endif
 // }
+
+void MinimizerGraph::align(const std::string& originalSeq) const
+{
+	std::cerr << "align" << std::endl;
+	// std::string seq = getHPC(originalSeq);
+	std::string seq = originalSeq;
+	assert(seq.size() > k + w);
+// #ifdef PRINTLENS
+	auto timeStart = std::chrono::system_clock::now();
+	std::vector<size_t> lens;
+	lens.resize(seq.size(), 0);
+// #endif
+	std::vector<size_t> lastMinmerSeqPos;
+	std::vector<size_t> lastMinmerMatchLen;
+	lastMinmerSeqPos.resize(minmers.size(), 0);
+	lastMinmerMatchLen.resize(minmers.size(), 0);
+	size_t lastprint = 0;
+	doForMinimizers(seq, [this, &seq, &lens, &lastMinmerSeqPos, &lastMinmerMatchLen](size_t minimizer, size_t seqPos)
+	{
+		for (auto graphPos : minmerIndex[minimizer])
+		{
+			auto neighbors = inNeighbors(graphPos);
+			size_t currentLen = 0;
+// #ifdef PRINTLENS
+			size_t lastPos = 0;
+// #endif
+			for (size_t i = 0; i < neighbors.size(); i++)
+			{
+				size_t lastLen = lastMinmerMatchLen[neighbors[i].first];
+				int seqDist = seqPos - lastMinmerSeqPos[neighbors[i].first];
+				int topoDistance = neighbors[i].second;
+				// assert(topoDistance <= k+w);
+				bool valid = true;
+				if (seqDist > SEQ_DIST_MODE_CUTOFF || topoDistance > SEQ_DIST_MODE_CUTOFF)
+				{
+					if (seqDist < topoDistance * 0.6 || seqDist > topoDistance / 0.6) valid = false;
+				}
+				// if (seqDist > MAX_SEQ_MINMER_DISTANCE) valid = false;
+				if (valid && topoDistance + lastLen > currentLen)
+				{
+					currentLen = topoDistance + lastLen;
+// #ifdef PRINTLENS
+					lastPos = lastMinmerSeqPos[neighbors[i].first];
+// #endif
+				}
+			}
+			lastMinmerSeqPos[graphPos] = seqPos;
+			lastMinmerMatchLen[graphPos] = currentLen;
+// #ifdef PRINTLENS
+			for (size_t i = lastPos; i < seqPos; i++)
+			{
+				lens[i] = std::max(lens[i], currentLen);
+			}
+// #endif
+		}
+		std::cerr << "align " << seqPos << "/" << seq.size() << " matches " << minmerIndex[minimizer].size() << std::endl;
+	});
+// #ifdef PRINTLENS
+	auto timeEnd = std::chrono::system_clock::now();
+	size_t time = std::chrono::duration_cast<std::chrono::milliseconds>(timeEnd - timeStart).count();
+	std::cerr << "time: " << time << std::endl;
+	size_t maxlen = 0;
+	for (size_t i = 0; i < lens.size(); i++)
+	{
+		maxlen = std::max(maxlen, lens[i]);
+	}
+	std::cerr << "maxlen: " << maxlen << std::endl;
+	std::cerr << "lens: " << std::endl;
+	for (size_t i = 0; i < lens.size(); i++)
+	{
+		std::cerr << lens[i] << std::endl;
+	}
+// #endif
+}
 
 std::pair<size_t, size_t> MinimizerGraph::findOneMinimizer(const std::string& seq) const
 {
