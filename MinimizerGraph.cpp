@@ -188,7 +188,7 @@ bool MinimizerGraph::tryLoadTree(std::string filename)
 	return file.good();
 }
 
-void MinimizerGraph::buildTreeRec(size_t parent, const std::vector<std::pair<size_t, size_t>>& activeIndices, const std::vector<size_t>& uniqueMinmers, const std::unordered_map<size_t, std::vector<std::pair<size_t, size_t>>>& reverseTopology)
+void MinimizerGraph::buildTreeRec(size_t parent, const std::vector<std::pair<size_t, size_t>>& activeIndices, const std::vector<size_t>& uniqueMinmers)
 {
 	if (tree.nodeDepths[parent] == MAX_TREE_DEPTH) return;
 	for (size_t i = 0; i < uniqueMinmers.size(); i++)
@@ -198,20 +198,17 @@ void MinimizerGraph::buildTreeRec(size_t parent, const std::vector<std::pair<siz
 		std::vector<size_t> leafMinmers;
 		for (auto index : activeIndices)
 		{
-			if (reverseTopology.count(index.first) == 0) continue;
-			for (size_t j = 0; j < reverseTopology.at(index.first).size(); j++)
+			if (reverseTopology[index.first].count(minmer) == 0) continue;
+			for (auto neighbor : reverseTopology[index.first].at(minmer))
 			{
-				if (minmers[reverseTopology.at(index.first)[j].first] == minmer)
+				size_t length = neighbor.second + index.second;
+				if (length <= MAX_TREE_PATH_LENGTH && tree.nodeDepths[parent] < MAX_TREE_DEPTH-1)
 				{
-					size_t length = reverseTopology.at(index.first)[j].second + index.second;
-					if (length <= MAX_TREE_PATH_LENGTH && tree.nodeDepths[parent] < MAX_TREE_DEPTH-1)
-					{
-						nextActives.emplace_back(reverseTopology.at(index.first)[j].first, length);
-					}
-					else
-					{
-						leafMinmers.emplace_back(index.first);
-					}
+					nextActives.emplace_back(neighbor.first, length);
+				}
+				else
+				{
+					leafMinmers.emplace_back(index.first);
 				}
 			}
 		}
@@ -230,20 +227,12 @@ void MinimizerGraph::buildTreeRec(size_t parent, const std::vector<std::pair<siz
 			continue;
 		}
 		if (nextActives.size() == 0) continue;
-		buildTreeRec(newIndex, nextActives, uniqueMinmers, reverseTopology);
+		buildTreeRec(newIndex, nextActives, uniqueMinmers);
 	}
 }
 
 void MinimizerGraph::initTree()
 {
-	std::unordered_map<size_t, std::vector<std::pair<size_t, size_t>>> reverseTopology;
-	for (size_t i = 0; i < topology.size(); i++)
-	{
-		for (auto neighbor : topology[i])
-		{
-			reverseTopology[neighbor.first].emplace_back(i, neighbor.second);
-		}
-	}
 	std::set<size_t> uniqueMinmersSet;
 	for (size_t i = 0; i < minmers.size(); i++)
 	{
@@ -269,7 +258,7 @@ void MinimizerGraph::initTree()
 		{
 			activeIndices.emplace_back(index, 0);
 		}
-		buildTreeRec(newIndex, activeIndices, uniqueMinmers, reverseTopology);
+		buildTreeRec(newIndex, activeIndices, uniqueMinmers);
 	}
 	std::cerr << "tree size " << tree.nodeLabels.size() << std::endl;
 	std::vector<size_t> totalPathsPerNode;
@@ -492,6 +481,14 @@ void MinimizerGraph::initTopology(const AlignmentGraph& graph)
 		expandTopoRec(i, i, 0);
 		if (processed % 100000 == 0) std::cerr << "expand topo " << processed << "/" << minmers.size() << std::endl;
 		processed++;
+	}
+	reverseTopology.resize(topology.size());
+	for (size_t i = 0; i < topology.size(); i++)
+	{
+		for (auto neighbor : topology[i])
+		{
+			reverseTopology[neighbor.first][minmers[i]].emplace_back(i, neighbor.second);
+		}
 	}
 	std::cerr << "topo finished" << std::endl;
 	std::cerr << "k: " << k << " w: " << w << std::endl;

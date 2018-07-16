@@ -98,7 +98,7 @@ private:
 	void initTopology(const AlignmentGraph& graph);
 	void initRandomOrdering();
 	void initTree();
-	void buildTreeRec(size_t parent, const std::vector<std::pair<size_t, size_t>>& activeIndices, const std::vector<size_t>& uniqueMinmers, const std::unordered_map<size_t, std::vector<std::pair<size_t, size_t>>>& reverseTopology);
+	void buildTreeRec(size_t parent, const std::vector<std::pair<size_t, size_t>>& activeIndices, const std::vector<size_t>& uniqueMinmers);
 	void getTotalPathsRec(size_t node, std::vector<size_t>& paths);
 	bool tryLoadOrdering(std::string filename);
 	bool tryLoadTopology(std::string filename);
@@ -111,6 +111,7 @@ private:
 	std::vector<size_t> minmers;
 	std::vector<std::vector<size_t>> minmerIndex;
 	std::vector<std::vector<std::pair<size_t, size_t>>> topology;
+	std::vector<std::unordered_map<size_t, std::vector<std::pair<size_t, size_t>>>> reverseTopology;
 	std::vector<size_t> minmerOrdering;
 	PathTree tree;
 };
