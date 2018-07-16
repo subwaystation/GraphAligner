@@ -25,8 +25,16 @@ namespace std
 	};
 }
 
+
 class MinimizerGraph
 {
+	struct PathTree
+	{
+		std::vector<size_t> nodeLabels;
+		std::vector<std::unordered_map<size_t, size_t>> children;
+		std::vector<size_t> nodeDepths;
+		std::vector<std::vector<size_t>> leafMinmers;
+	};
 public:
 	MinimizerGraph(size_t k, size_t w, const AlignmentGraph& graph);
 	size_t minmerize(std::string kmer) const;
@@ -40,32 +48,43 @@ private:
 	{
 		std::vector<size_t> window;
 		window.resize(w, 0);
-		window[0] = minmerize(seq.substr(0, k));
-		size_t smallestPos = 0;
-		for (size_t i = 1; i < w; i++)
+		window[k-1] = minmerize(seq.substr(0, k));
+		size_t smallestPos = k-1;
+		for (size_t i = k; i < w; i++)
 		{
 			window[i] = nextminmer(window[i-1], seq[i]);
 			if (minmerCompare(window[i], window[smallestPos])) smallestPos = i;
 		}
 		assert(minmerOrdering[window[smallestPos]] != std::numeric_limits<size_t>::max());
-		f(window[smallestPos], k + smallestPos - 1);
-		for (size_t seqPos = k+w; seqPos < seq.size(); seqPos++)
+		auto test = findOneMinimizer(seq.substr(0, w));
+		assert(test.first == window[smallestPos]);
+		f(window[smallestPos], smallestPos);
+		for (size_t seqPos = w; seqPos < seq.size(); seqPos++)
 		{
-			size_t windowpos = (seqPos - k) % w;
+			size_t windowpos = seqPos % w;
 			size_t newMinmer = nextminmer(window[(windowpos + w - 1) % w], seq[seqPos]);
 			window[windowpos] = newMinmer;
 			if (smallestPos == windowpos)
 			{
 				assert(minmerOrdering[newMinmer] != std::numeric_limits<size_t>::max());
-				f(newMinmer, seqPos);
 				for (size_t i = 0; i < w; i++)
 				{
 					if (minmerCompare(window[i], window[smallestPos])) smallestPos = i;
 				}
+				std::pair<size_t, size_t> test;
+				if (seqPos >= k+w-1) test = findOneMinimizer(seq.substr(seqPos - k - w + 2, k+w-1));
+				else test = findOneMinimizer(seq.substr(0, seqPos+1));
+				assert(test.first == window[smallestPos]);
+				f(window[smallestPos], seqPos - ((w + windowpos - smallestPos) % w));
 			}
 			else if (minmerCompare(newMinmer, window[smallestPos]))
 			{
+				smallestPos = windowpos;
 				assert(minmerOrdering[newMinmer] != std::numeric_limits<size_t>::max());
+				std::pair<size_t, size_t> test;
+				if (seqPos >= k+w-1) test = findOneMinimizer(seq.substr(seqPos - k - w + 2, k+w-1));
+				else test = findOneMinimizer(seq.substr(0, seqPos+1));
+				assert(test.first == newMinmer);
 				f(newMinmer, seqPos);
 			}
 		}
@@ -78,12 +97,22 @@ private:
 	bool minmerCompare(size_t left, size_t right) const;
 	void initTopology(const AlignmentGraph& graph);
 	void initRandomOrdering();
+	void initTree();
+	void buildTreeRec(size_t parent, const std::vector<std::pair<size_t, size_t>>& activeIndices, const std::vector<size_t>& uniqueMinmers, const std::unordered_map<size_t, std::vector<std::pair<size_t, size_t>>>& reverseTopology);
+	void getTotalPathsRec(size_t node, std::vector<size_t>& paths);
+	bool tryLoadOrdering(std::string filename);
+	bool tryLoadTopology(std::string filename);
+	bool tryLoadTree(std::string filename);
+	void storeTree(std::string filename);
+	void storeTopology(std::string filename);
+	void storeOrdering(std::string filename);
 	size_t k;
 	size_t w;
 	std::vector<size_t> minmers;
 	std::vector<std::vector<size_t>> minmerIndex;
 	std::vector<std::vector<std::pair<size_t, size_t>>> topology;
 	std::vector<size_t> minmerOrdering;
+	PathTree tree;
 };
 
 #endif

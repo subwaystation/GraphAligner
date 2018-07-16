@@ -1,3 +1,4 @@
+#include <fstream>
 #include <unordered_map>
 #include <iostream>
 #include <chrono>
@@ -6,9 +7,11 @@
 #include "ThreadReadAssertion.h"
 #include "CommonUtils.h"
 
-constexpr int MAX_GRAPH_TOPO_DISTANCE = 128;
-constexpr int MAX_SEQ_MINMER_DISTANCE = 128;
-constexpr int SEQ_DIST_MODE_CUTOFF = 32;
+constexpr int MAX_GRAPH_TOPO_DISTANCE = 15;
+constexpr int MAX_SEQ_MINMER_DISTANCE = 15;
+// constexpr int SEQ_DIST_MODE_CUTOFF = 32;
+constexpr int MAX_TREE_DEPTH = 20;
+constexpr int MAX_TREE_PATH_LENGTH = 256;
 
 size_t charNum(char c)
 {
@@ -46,9 +49,258 @@ MinimizerGraph::MinimizerGraph(size_t k, size_t w, const AlignmentGraph& graph) 
 k(k),
 w(w)
 {
+	assert(k < w);
 	assert(k < sizeof(size_t) * 8 / 2);
-	initRandomOrdering();
-	initTopology(graph);
+	if (!tryLoadOrdering("index.order.tmi"))
+	{
+		initRandomOrdering();
+		storeOrdering("index.order.tmi");
+	}
+	if (!tryLoadTopology("index.topo.tmi"))
+	{
+		initTopology(graph);
+		storeTopology("index.topo.tmi");
+	}
+	if (!tryLoadTree("index.tree.tmi"))
+	{
+		initTree();
+		storeTree("index.tree.tmi");
+	}
+}
+
+void save(std::ofstream& file, size_t value)
+{
+	file << value << " ";
+}
+
+template <typename T, typename U>
+void save(std::ofstream& file, std::pair<T, U> value)
+{
+	save(file, value.first);
+	save(file, value.second);
+}
+
+void load(std::ifstream& file, size_t& result)
+{
+	file >> result;
+}
+
+template <typename T, typename U>
+void load(std::ifstream& file, std::pair<T, U>& result)
+{
+	load(file, result.first);
+	load(file, result.second);
+}
+
+template <typename T, typename U>
+void load(std::ifstream& file, std::unordered_map<T, U>& result)
+{
+	size_t count = 0;
+	file >> count;
+	for (size_t i = 0; i < count; i++)
+	{
+		T key;
+		U value;
+		load(file, key);
+		load(file, value);
+		result[key] = value;
+	}
+}
+
+template <typename T>
+void load(std::ifstream& file, std::vector<T>& result)
+{
+	size_t count = 0;
+	file >> count;
+	for (size_t i = 0; i < count; i++)
+	{
+		T item;
+		load(file, item);
+		result.push_back(item);
+	}
+}
+
+template <typename T, typename U>
+void save(std::ofstream& file, const std::unordered_map<T, U>& map)
+{
+	file << map.size() << " ";
+	for (auto pair : map)
+	{
+		save(file, pair.first);
+		save(file, pair.second);
+	}
+}
+
+template <typename T>
+void save(std::ofstream& file, const std::vector<T>& vec)
+{
+	file << vec.size() << " ";
+	for (size_t i = 0; i < vec.size(); i++)
+	{
+		save(file, vec[i]);
+	}
+}
+
+void MinimizerGraph::storeOrdering(std::string filename)
+{
+	std::ofstream file {filename};
+	save(file, minmerOrdering);
+}
+
+bool MinimizerGraph::tryLoadOrdering(std::string filename)
+{
+	std::ifstream file {filename};
+	load(file, minmerOrdering);
+	return file.good();
+}
+
+void MinimizerGraph::storeTopology(std::string filename)
+{
+	std::ofstream file {filename};
+	save(file, minmers);
+	save(file, minmerIndex);
+	save(file, topology);
+}
+
+bool MinimizerGraph::tryLoadTopology(std::string filename)
+{
+	std::ifstream file {filename};
+	load(file, minmers);
+	load(file, minmerIndex);
+	load(file, topology);
+	return file.good();
+}
+
+void MinimizerGraph::storeTree(std::string filename)
+{
+	std::ofstream file {filename};
+	save(file, tree.nodeLabels);
+	save(file, tree.children);
+	save(file, tree.nodeDepths);
+}
+
+bool MinimizerGraph::tryLoadTree(std::string filename)
+{
+	std::ifstream file {filename};
+	load(file, tree.nodeLabels);
+	load(file, tree.children);
+	load(file, tree.nodeDepths);
+	return file.good();
+}
+
+void MinimizerGraph::buildTreeRec(size_t parent, const std::vector<std::pair<size_t, size_t>>& activeIndices, const std::vector<size_t>& uniqueMinmers, const std::unordered_map<size_t, std::vector<std::pair<size_t, size_t>>>& reverseTopology)
+{
+	if (tree.nodeDepths[parent] == MAX_TREE_DEPTH) return;
+	for (size_t i = 0; i < uniqueMinmers.size(); i++)
+	{
+		size_t minmer = uniqueMinmers[i];
+		std::vector<std::pair<size_t, size_t>> nextActives;
+		std::vector<size_t> leafMinmers;
+		for (auto index : activeIndices)
+		{
+			if (reverseTopology.count(index.first) == 0) continue;
+			for (size_t j = 0; j < reverseTopology.at(index.first).size(); j++)
+			{
+				if (minmers[reverseTopology.at(index.first)[j].first] == minmer)
+				{
+					size_t length = reverseTopology.at(index.first)[j].second + index.second;
+					if (length <= MAX_TREE_PATH_LENGTH && tree.nodeDepths[parent] < MAX_TREE_DEPTH-1)
+					{
+						nextActives.emplace_back(reverseTopology.at(index.first)[j].first, length);
+					}
+					else
+					{
+						leafMinmers.emplace_back(index.first);
+					}
+				}
+			}
+		}
+		if (nextActives.size() == 0 && leafMinmers.size() == 0) continue;
+
+		size_t newIndex = tree.children.size();
+		tree.children.emplace_back();
+		tree.children[parent][minmer] = newIndex;
+		tree.nodeLabels.push_back(minmer);
+		tree.nodeDepths.push_back(tree.nodeDepths[parent] + 1);
+		tree.leafMinmers.push_back(leafMinmers);
+
+		if (nextActives.size() == 1)
+		{
+			tree.leafMinmers.back().push_back(nextActives[0].first);
+			continue;
+		}
+		if (nextActives.size() == 0) continue;
+		buildTreeRec(newIndex, nextActives, uniqueMinmers, reverseTopology);
+	}
+}
+
+void MinimizerGraph::initTree()
+{
+	std::unordered_map<size_t, std::vector<std::pair<size_t, size_t>>> reverseTopology;
+	for (size_t i = 0; i < topology.size(); i++)
+	{
+		for (auto neighbor : topology[i])
+		{
+			reverseTopology[neighbor.first].emplace_back(i, neighbor.second);
+		}
+	}
+	std::set<size_t> uniqueMinmersSet;
+	for (size_t i = 0; i < minmers.size(); i++)
+	{
+		uniqueMinmersSet.insert(minmers[i]);
+	}
+	std::vector<size_t> uniqueMinmers { uniqueMinmersSet.begin(), uniqueMinmersSet.end() };
+	tree.nodeLabels.push_back(0);
+	tree.nodeDepths.push_back(0);
+	tree.children.emplace_back();
+	tree.leafMinmers.emplace_back();
+	for (size_t i = 0; i < uniqueMinmers.size(); i++)
+	{
+		std::cerr << "branch " << i << "/" << uniqueMinmers.size() << " nodes " << tree.nodeLabels.size() << std::endl;
+		size_t minmer = uniqueMinmers[i];
+		size_t newIndex = tree.nodeLabels.size();
+		tree.children.emplace_back();
+		tree.children[0][minmer] = newIndex;
+		tree.leafMinmers.emplace_back();
+		tree.nodeLabels.push_back(minmer);
+		tree.nodeDepths.push_back(1);
+		std::vector<std::pair<size_t, size_t>> activeIndices;
+		for (auto index : minmerIndex[minmer])
+		{
+			activeIndices.emplace_back(index, 0);
+		}
+		buildTreeRec(newIndex, activeIndices, uniqueMinmers, reverseTopology);
+	}
+	std::cerr << "tree size " << tree.nodeLabels.size() << std::endl;
+	std::vector<size_t> totalPathsPerNode;
+	totalPathsPerNode.resize(tree.nodeLabels.size(), 0);
+	getTotalPathsRec(0, totalPathsPerNode);
+	std::vector<size_t> numNodesPerDepth;
+	std::vector<size_t> numPathsPerDepth;
+	std::vector<size_t> maxPathsPerDepth;
+	numNodesPerDepth.resize(MAX_TREE_DEPTH+1, 0);
+	numPathsPerDepth.resize(MAX_TREE_DEPTH+1, 0);
+	maxPathsPerDepth.resize(MAX_TREE_DEPTH+1, 0);
+	for (size_t i = 0; i < tree.nodeLabels.size(); i++)
+	{
+		numNodesPerDepth[tree.nodeDepths[i]]++;
+		numPathsPerDepth[tree.nodeDepths[i]] += totalPathsPerNode[i];
+		maxPathsPerDepth[tree.nodeDepths[i]] = std::max(maxPathsPerDepth[tree.nodeDepths[i]], totalPathsPerNode[i]);
+	}
+	for (size_t i = 0; i < MAX_TREE_DEPTH+1; i++)
+	{
+		std::cerr << "depth " << i << " nodes " << numNodesPerDepth[i] << " paths " << numPathsPerDepth[i] << " avg " << (double)numPathsPerDepth[i] / (double)numNodesPerDepth[i] << " max " << maxPathsPerDepth[i] << std::endl;
+	}
+}
+
+void MinimizerGraph::getTotalPathsRec(size_t node, std::vector<size_t>& totalPathsPerNode)
+{
+	totalPathsPerNode[node] += tree.leafMinmers[node].size();
+	for (auto child : tree.children[node])
+	{
+		getTotalPathsRec(child.second, totalPathsPerNode);
+		totalPathsPerNode[node] += totalPathsPerNode[child.second];
+	}
 }
 
 void MinimizerGraph::initRandomOrdering()
@@ -126,10 +378,10 @@ void MinimizerGraph::addMinmersRec(size_t pos, std::string& currentMer, std::vec
 	assert(posStack.size() == currentMer.size());
 	posStack.push_back(pos);
 	currentMer += graph.NodeSequences(pos);
-	if (posStack.size() == w+k)
+	if (posStack.size() == w)
 	{
 		assert(posStack.size() == currentMer.size());
-		assert(posStack.size() == w+k);
+		assert(posStack.size() == w);
 		auto found = findOneMinimizer(currentMer);
 		addMinmerIfUnique(posStack, found.first, found.second, endPositions);
 	}
@@ -286,7 +538,6 @@ std::vector<std::pair<size_t, size_t>> MinimizerGraph::inNeighbors(size_t index)
 void MinimizerGraph::align(const std::string& originalSeq) const
 {
 	std::cerr << "align" << std::endl;
-	// std::string seq = getHPC(originalSeq);
 	std::string seq = originalSeq;
 	assert(seq.size() > k + w);
 // #ifdef PRINTLENS
@@ -294,50 +545,40 @@ void MinimizerGraph::align(const std::string& originalSeq) const
 	std::vector<size_t> lens;
 	lens.resize(seq.size(), 0);
 // #endif
-	std::vector<size_t> lastMinmerSeqPos;
-	std::vector<size_t> lastMinmerMatchLen;
-	lastMinmerSeqPos.resize(minmers.size(), 0);
-	lastMinmerMatchLen.resize(minmers.size(), 0);
-	size_t lastprint = 0;
-	doForMinimizers(seq, [this, &seq, &lens, &lastMinmerSeqPos, &lastMinmerMatchLen](size_t minimizer, size_t seqPos)
+	std::vector<size_t> activeTreeNodes;
+	std::vector<size_t> activeNextTreeNodes;
+	std::vector<size_t> treeNodeLastActivePos;
+	std::vector<size_t> treeNodeLastActiveLen;
+	activeTreeNodes.push_back(0);
+	treeNodeLastActivePos.resize(tree.nodeLabels.size(), 0);
+	treeNodeLastActiveLen.resize(tree.nodeLabels.size(), 0);
+	doForMinimizers(seq, [this, &activeTreeNodes, &lens, &activeNextTreeNodes, &treeNodeLastActivePos, &treeNodeLastActiveLen](size_t minmer, size_t seqPos)
 	{
-		for (auto graphPos : minmerIndex[minimizer])
+		assert(activeTreeNodes.size() > 0);
+		assert(activeTreeNodes[0] == 0);
+		treeNodeLastActivePos[0] = seqPos;
+		activeNextTreeNodes.push_back(0);
+		// std::cerr << "pos " << seqPos << " actives " << activeTreeNodes.size() << " minimizers " << minmerIndex[minmer].size();
+		// if (tree.children[0].count(minmer) == 0) std::cerr << " NOT IN THE ROOT!";
+		// std::cerr << std::endl;
+		for (auto node : activeTreeNodes)
 		{
-			auto neighbors = inNeighbors(graphPos);
-			size_t currentLen = 0;
+			assert(seqPos >= treeNodeLastActivePos[node]);
+			if (seqPos - treeNodeLastActivePos[node] > MAX_SEQ_MINMER_DISTANCE) continue;
+			auto found = tree.children[node].find(minmer);
+			if (found == tree.children[node].end()) continue;
+			activeNextTreeNodes.push_back(found->second);
+			treeNodeLastActivePos[found->second] = seqPos;
+			treeNodeLastActiveLen[found->second] = treeNodeLastActiveLen[node] + 1;
 // #ifdef PRINTLENS
-			size_t lastPos = 0;
-// #endif
-			for (size_t i = 0; i < neighbors.size(); i++)
+			for (size_t i = treeNodeLastActivePos[node]; i <= seqPos; i++)
 			{
-				size_t lastLen = lastMinmerMatchLen[neighbors[i].first];
-				int seqDist = seqPos - lastMinmerSeqPos[neighbors[i].first];
-				int topoDistance = neighbors[i].second;
-				// assert(topoDistance <= k+w);
-				bool valid = true;
-				if (seqDist > SEQ_DIST_MODE_CUTOFF || topoDistance > SEQ_DIST_MODE_CUTOFF)
-				{
-					if (seqDist < topoDistance * 0.6 || seqDist > topoDistance / 0.6) valid = false;
-				}
-				// if (seqDist > MAX_SEQ_MINMER_DISTANCE) valid = false;
-				if (valid && topoDistance + lastLen > currentLen)
-				{
-					currentLen = topoDistance + lastLen;
-// #ifdef PRINTLENS
-					lastPos = lastMinmerSeqPos[neighbors[i].first];
-// #endif
-				}
-			}
-			lastMinmerSeqPos[graphPos] = seqPos;
-			lastMinmerMatchLen[graphPos] = currentLen;
-// #ifdef PRINTLENS
-			for (size_t i = lastPos; i < seqPos; i++)
-			{
-				lens[i] = std::max(lens[i], currentLen);
+				lens[i] = std::max(lens[i], treeNodeLastActiveLen[found->second]);
 			}
 // #endif
 		}
-		std::cerr << "align " << seqPos << "/" << seq.size() << " matches " << minmerIndex[minimizer].size() << std::endl;
+		std::swap(activeTreeNodes, activeNextTreeNodes);
+		activeNextTreeNodes.clear();
 	});
 // #ifdef PRINTLENS
 	auto timeEnd = std::chrono::system_clock::now();
@@ -356,6 +597,80 @@ void MinimizerGraph::align(const std::string& originalSeq) const
 	}
 // #endif
 }
+
+// void MinimizerGraph::align(const std::string& originalSeq) const
+// {
+// 	std::cerr << "align" << std::endl;
+// 	// std::string seq = getHPC(originalSeq);
+// 	std::string seq = originalSeq;
+// 	assert(seq.size() > k + w);
+// // #ifdef PRINTLENS
+// 	auto timeStart = std::chrono::system_clock::now();
+// 	std::vector<size_t> lens;
+// 	lens.resize(seq.size(), 0);
+// // #endif
+// 	std::vector<size_t> lastMinmerSeqPos;
+// 	std::vector<size_t> lastMinmerMatchLen;
+// 	lastMinmerSeqPos.resize(minmers.size(), 0);
+// 	lastMinmerMatchLen.resize(minmers.size(), 0);
+// 	size_t lastprint = 0;
+// 	doForMinimizers(seq, [this, &seq, &lens, &lastMinmerSeqPos, &lastMinmerMatchLen](size_t minimizer, size_t seqPos)
+// 	{
+// 		for (auto graphPos : minmerIndex[minimizer])
+// 		{
+// 			auto neighbors = inNeighbors(graphPos);
+// 			size_t currentLen = 0;
+// // #ifdef PRINTLENS
+// 			size_t lastPos = 0;
+// // #endif
+// 			for (size_t i = 0; i < neighbors.size(); i++)
+// 			{
+// 				size_t lastLen = lastMinmerMatchLen[neighbors[i].first];
+// 				int seqDist = seqPos - lastMinmerSeqPos[neighbors[i].first];
+// 				int topoDistance = neighbors[i].second;
+// 				// assert(topoDistance <= k+w);
+// 				bool valid = true;
+// 				if (seqDist > SEQ_DIST_MODE_CUTOFF || topoDistance > SEQ_DIST_MODE_CUTOFF)
+// 				{
+// 					if (seqDist < topoDistance * 0.6 || seqDist > topoDistance / 0.6) valid = false;
+// 				}
+// 				// if (seqDist > MAX_SEQ_MINMER_DISTANCE) valid = false;
+// 				if (valid && topoDistance + lastLen > currentLen)
+// 				{
+// 					currentLen = topoDistance + lastLen;
+// // #ifdef PRINTLENS
+// 					lastPos = lastMinmerSeqPos[neighbors[i].first];
+// // #endif
+// 				}
+// 			}
+// 			lastMinmerSeqPos[graphPos] = seqPos;
+// 			lastMinmerMatchLen[graphPos] = currentLen;
+// // #ifdef PRINTLENS
+// 			for (size_t i = lastPos; i < seqPos; i++)
+// 			{
+// 				lens[i] = std::max(lens[i], currentLen);
+// 			}
+// // #endif
+// 		}
+// 		std::cerr << "align " << seqPos << "/" << seq.size() << " matches " << minmerIndex[minimizer].size() << std::endl;
+// 	});
+// // #ifdef PRINTLENS
+// 	auto timeEnd = std::chrono::system_clock::now();
+// 	size_t time = std::chrono::duration_cast<std::chrono::milliseconds>(timeEnd - timeStart).count();
+// 	std::cerr << "time: " << time << std::endl;
+// 	size_t maxlen = 0;
+// 	for (size_t i = 0; i < lens.size(); i++)
+// 	{
+// 		maxlen = std::max(maxlen, lens[i]);
+// 	}
+// 	std::cerr << "maxlen: " << maxlen << std::endl;
+// 	std::cerr << "lens: " << std::endl;
+// 	for (size_t i = 0; i < lens.size(); i++)
+// 	{
+// 		std::cerr << lens[i] << std::endl;
+// 	}
+// // #endif
+// }
 
 std::pair<size_t, size_t> MinimizerGraph::findOneMinimizer(const std::string& seq) const
 {
