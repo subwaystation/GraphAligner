@@ -34,13 +34,14 @@ class MinimizerGraph
 		std::vector<std::unordered_map<size_t, size_t>> children;
 		std::vector<size_t> nodeDepths;
 		std::vector<std::vector<std::pair<size_t, size_t>>> leafMinmers;
+		std::vector<size_t> parents;
 	};
 public:
 	MinimizerGraph(size_t k, size_t w, const AlignmentGraph& graph);
 	size_t minmerize(std::string kmer) const;
 	size_t nextminmer(size_t minmer, char newChar) const;
 	std::vector<std::pair<size_t, size_t>> inNeighbors(size_t minmer) const;
-	void align(const std::string& seq) const;
+	void align(const std::string& readname, const std::string& seq) const;
 private:
 	std::pair<size_t, size_t> findOneMinimizer(const std::string& seq) const;
 	template <typename F>
@@ -51,7 +52,7 @@ private:
 		assert(w-k+1 < sizeof(size_t) * 8);
 		size_t printed = 0;
 		window[0] = minmerize(seq.substr(0, k));
-		size_t smallestPos = k-1;
+		size_t smallestPos = 0;
 		for (size_t i = 1; i < w-k+1; i++)
 		{
 			window[i] = nextminmer(window[i-1], seq[k-1+i]);

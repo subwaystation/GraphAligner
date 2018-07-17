@@ -305,13 +305,13 @@ void alignReads(AlignerParams params)
 
 	std::cout << "Build minimizer graph" << std::endl;
 	
-	auto minimizerGraph = MinimizerGraph(4, 7, alignmentGraph);
+	auto minimizerGraph = MinimizerGraph(11, 32, alignmentGraph);
 
 	std::cout << "Align" << std::endl;
 
 	for (auto read : fastqs)
 	{
-		minimizerGraph.align(read.sequence);
+		minimizerGraph.align(read.seq_id, read.sequence);
 	}
 
 	// for (int i = 0; i < params.numThreads; i++)
