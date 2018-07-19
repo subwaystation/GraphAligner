@@ -107,6 +107,9 @@ $(BINDIR)/UnravelGraph: UnravelGraph.cpp $(ODIR)/CommonUtils.o $(ODIR)/vg.pb.o $
 $(BINDIR)/SamplePaths: SamplePaths.cpp $(ODIR)/CommonUtils.o $(ODIR)/vg.pb.o
 	$(GPP) -o $@ $^ $(LINKFLAGS)
 
+$(BINDIR)/CutAlignmentEnds: CutAlignmentEnds.cpp $(ODIR)/CommonUtils.o $(ODIR)/vg.pb.o
+	$(GPP) -o $@ $^ $(LINKFLAGS)
+
 all: $(BINDIR)/Aligner $(BINDIR)/ReadIndexToId $(BINDIR)/CompareAlignments $(BINDIR)/SimulateReads $(BINDIR)/ReverseReads $(BINDIR)/PickSeedHits $(BINDIR)/AlignmentSequenceInserter $(BINDIR)/MergeGraphs $(BINDIR)/SupportedSubgraph $(BINDIR)/MafToAlignment $(BINDIR)/ExtractPathSequence $(BINDIR)/AlignmentOverlap $(BINDIR)/Bluntify $(BINDIR)/ExtractPathSubgraphNeighbourhood $(BINDIR)/MergeGfas $(BINDIR)/VisualizeAlignment $(BINDIR)/SelectPartials $(BINDIR)/NodePosCsv $(BINDIR)/ExtractExactPathSubgraph $(BINDIR)/EstimateRepeatCount $(BINDIR)/SelectFullAlignments $(BINDIR)/AddNodeNames $(BINDIR)/PickMummerSeeds $(BINDIR)/SelectLongestAlignment
 
 clean:
