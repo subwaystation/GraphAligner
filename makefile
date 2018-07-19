@@ -1,6 +1,6 @@
 CC=gcc
 GPP=g++
-CPPFLAGS=-Wall -std=c++14 -O3 -g
+CPPFLAGS=-Wall -std=c++14 -O0 -g
 
 ODIR=obj
 BINDIR=bin
@@ -99,6 +99,12 @@ $(BINDIR)/PickMummerSeeds: PickMummerSeeds.cpp $(ODIR)/CommonUtils.o $(ODIR)/vg.
 	$(GPP) -o $@ $^ $(LINKFLAGS)
 
 $(BINDIR)/SelectLongestAlignment: SelectLongestAlignment.cpp $(ODIR)/CommonUtils.o $(ODIR)/vg.pb.o $(ODIR)/fastqloader.o
+	$(GPP) -o $@ $^ $(LINKFLAGS)
+
+$(BINDIR)/UnravelGraph: UnravelGraph.cpp $(ODIR)/CommonUtils.o $(ODIR)/vg.pb.o $(ODIR)/GfaGraph.o
+	$(GPP) -o $@ $^ $(LINKFLAGS)
+
+$(BINDIR)/SamplePaths: SamplePaths.cpp $(ODIR)/CommonUtils.o $(ODIR)/vg.pb.o
 	$(GPP) -o $@ $^ $(LINKFLAGS)
 
 all: $(BINDIR)/Aligner $(BINDIR)/ReadIndexToId $(BINDIR)/CompareAlignments $(BINDIR)/SimulateReads $(BINDIR)/ReverseReads $(BINDIR)/PickSeedHits $(BINDIR)/AlignmentSequenceInserter $(BINDIR)/MergeGraphs $(BINDIR)/SupportedSubgraph $(BINDIR)/MafToAlignment $(BINDIR)/ExtractPathSequence $(BINDIR)/AlignmentOverlap $(BINDIR)/Bluntify $(BINDIR)/ExtractPathSubgraphNeighbourhood $(BINDIR)/MergeGfas $(BINDIR)/VisualizeAlignment $(BINDIR)/SelectPartials $(BINDIR)/NodePosCsv $(BINDIR)/ExtractExactPathSubgraph $(BINDIR)/EstimateRepeatCount $(BINDIR)/SelectFullAlignments $(BINDIR)/AddNodeNames $(BINDIR)/PickMummerSeeds $(BINDIR)/SelectLongestAlignment
