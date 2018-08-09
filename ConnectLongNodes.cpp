@@ -2,6 +2,16 @@
 #include "GfaGraph.h"
 #include "CommonUtils.h"
 
+bool operator>(const NodePos& left, const NodePos& right)
+{
+	return left.id > right.id || (left.id == right.id && left.end && !right.end);
+}
+
+bool operator<(const NodePos& left, const NodePos& right)
+{
+	return left.id < right.id || (left.id == right.id && !left.end && right.end);
+}
+
 std::unordered_set<int> getLongNodes(const GfaGraph& graph, int minLen)
 {
 	std::unordered_set<int> result;
@@ -100,6 +110,35 @@ void makeGraphAndWrite(const std::vector<std::tuple<NodePos, NodePos, bool, std:
 	}
 }
 
+std::vector<std::tuple<NodePos, NodePos, bool, std::string>> canonizePaths(const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& paths)
+{
+	std::vector<std::tuple<NodePos, NodePos, bool, std::string>> result;
+	for (auto path : paths)
+	{
+		auto start = std::get<0>(path);
+		auto end = std::get<1>(path);
+		if (start > end)
+		{
+			end.end = !end.end;
+			start.end = !start.end;
+			assert(!(end > start));
+			result.emplace_back(end, start, std::get<2>(path), CommonUtils::ReverseComplement(std::get<3>(path)));
+		}
+		else
+		{
+			result.push_back(path);
+		}
+	}
+	return result;
+}
+
+std::vector<std::tuple<NodePos, NodePos, bool, std::string>> pickUniquePaths(const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& paths)
+{
+	std::set<std::tuple<NodePos, NodePos, bool, std::string>> uniques { paths.begin(), paths.end() };
+	std::vector<std::tuple<NodePos, NodePos, bool, std::string>> result { uniques.begin(), uniques.end() };
+	return result;
+}
+
 int main(int argc, char** argv)
 {
 	std::string alnfile { argv[1] };
@@ -113,5 +152,7 @@ int main(int argc, char** argv)
 	auto longNodes = getLongNodes(graph, minLongnodeLength);
 	auto parts = splitAlnsToParts(alns, longNodes, minLongnodeAlnlen);
 	auto connectors = getConnectingNodes(parts, longNodes, graph);
-	makeGraphAndWrite(connectors, longNodes, graph, outputGraphFile);
+	auto canon = canonizePaths(connectors);
+	auto uniques = pickUniquePaths(canon);
+	makeGraphAndWrite(uniques, longNodes, graph, outputGraphFile);
 }
