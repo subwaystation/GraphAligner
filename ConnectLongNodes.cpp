@@ -49,14 +49,9 @@ std::vector<std::vector<NodePos>> splitAlnsToParts(const std::vector<vg::Alignme
 	return result;
 }
 
-void makeGraphAndWrite(const std::vector<std::vector<NodePos>>& parts, const std::unordered_set<int> longNodes, const GfaGraph& graph, std::string filename)
+std::vector<std::tuple<NodePos, NodePos, bool, std::string>> getConnectingNodes(const std::vector<std::vector<NodePos>>& parts, const std::unordered_set<int> longNodes, const GfaGraph& graph)
 {
-	std::ofstream file { filename };
-	for (auto node : longNodes)
-	{
-		file << "S\t" << node << "\t" << graph.nodes.at(node) << std::endl;
-	}
-	int nextId = graph.nodes.size()+1;
+	std::vector<std::tuple<NodePos, NodePos, bool, std::string>> result;
 	for (auto path : parts)
 	{
 		assert(path.size() >= 2);
@@ -64,7 +59,7 @@ void makeGraphAndWrite(const std::vector<std::vector<NodePos>>& parts, const std
 		assert(longNodes.count(path.back().id) == 1);
 		if (path.size() == 2)
 		{
-			file << "L\t" << path[0].id << "\t" << (path[0].end ? "-" : "+") << "\t" << path[1].id << "\t" << (path[1].end ? "-" : "+") << "\t" << graph.edgeOverlap << "M" << std::endl;
+			result.emplace_back(path[0], path.back(), true, "");
 			continue;
 		}
 		std::string sequence;
@@ -78,9 +73,29 @@ void makeGraphAndWrite(const std::vector<std::vector<NodePos>>& parts, const std
 			if (path[i].end) part = CommonUtils::ReverseComplement(part);
 			sequence += part.substr(graph.edgeOverlap);
 		}
-		file << "S\t" << nextId << "\t" << sequence << std::endl;
-		file << "L\t" << path[0].id << "\t" << (path[0].end ? "-" : "+") << "\t" << nextId << "\t+\t" << graph.edgeOverlap << "M" << std::endl;
-		file << "L\t" << nextId << "\t+\t" << path.back().id << "\t" << (path.back().end ? "-" : "+") << "\t" << graph.edgeOverlap << "M" << std::endl;
+		result.emplace_back(path[0], path.back(), false, sequence);
+	}
+	return result;
+}
+
+void makeGraphAndWrite(const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& connectors, const std::unordered_set<int> longNodes, const GfaGraph& graph, std::string filename)
+{
+	std::ofstream file { filename };
+	for (auto node : longNodes)
+	{
+		file << "S\t" << node << "\t" << graph.nodes.at(node) << std::endl;
+	}
+	int nextId = graph.nodes.size()+1;
+	for (auto path : connectors)
+	{
+		if (std::get<2>(path))
+		{
+			file << "L\t" << std::get<0>(path).id << "\t" << (std::get<0>(path).end ? "-" : "+") << "\t" << std::get<1>(path).id << "\t" << (std::get<1>(path).end ? "-" : "+") << "\t" << graph.edgeOverlap << "M" << std::endl;
+			continue;
+		}
+		file << "S\t" << nextId << "\t" << std::get<3>(path) << std::endl;
+		file << "L\t" << std::get<0>(path).id << "\t" << (std::get<0>(path).end ? "-" : "+") << "\t" << nextId << "\t+\t" << graph.edgeOverlap << "M" << std::endl;
+		file << "L\t" << nextId << "\t+\t" << std::get<1>(path).id << "\t" << (std::get<1>(path).end ? "-" : "+") << "\t" << graph.edgeOverlap << "M" << std::endl;
 		nextId++;
 	}
 }
@@ -97,5 +112,6 @@ int main(int argc, char** argv)
 	auto graph = GfaGraph::LoadFromFile(graphfile);
 	auto longNodes = getLongNodes(graph, minLongnodeLength);
 	auto parts = splitAlnsToParts(alns, longNodes, minLongnodeAlnlen);
-	makeGraphAndWrite(parts, longNodes, graph, outputGraphFile);
+	auto connectors = getConnectingNodes(parts, longNodes, graph);
+	makeGraphAndWrite(connectors, longNodes, graph, outputGraphFile);
 }
