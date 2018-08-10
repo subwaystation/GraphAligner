@@ -1,4 +1,6 @@
+#include <algorithm>
 #include <fstream>
+#include "fastqloader.h"
 #include "GfaGraph.h"
 #include "CommonUtils.h"
 
@@ -139,20 +141,131 @@ std::vector<std::tuple<NodePos, NodePos, bool, std::string>> pickUniquePaths(con
 	return result;
 }
 
+std::vector<std::tuple<NodePos, NodePos, bool, std::string>> getSecondaryConnectors(const std::vector<vg::Alignment>& alns, const std::vector<FastQ>& reads, const std::unordered_set<int>& longNodes, size_t minLen, const GfaGraph& graph)
+{
+	std::vector<std::tuple<NodePos, NodePos, bool, std::string>> result;
+	std::unordered_map<std::string, std::string> readSeqs;
+	for (auto read : reads)
+	{
+		readSeqs[read.seq_id] = read.sequence;
+	}
+	std::unordered_map<std::string, std::vector<vg::Alignment>> alnsPerRead;
+	for (auto aln : alns)
+	{
+		alnsPerRead[aln.name()].push_back(aln);
+	}
+	for (auto pair : alnsPerRead)
+	{
+		auto readseq = readSeqs[pair.first];
+		std::sort(pair.second.begin(), pair.second.end(), [](const vg::Alignment& left, const vg::Alignment& right) { return left.query_position() < right.query_position(); });
+		std::vector<std::pair<NodePos, size_t>> alnFirstValid;
+		std::vector<std::pair<NodePos, size_t>> alnLastValid;
+		alnFirstValid.resize(pair.second.size(), std::make_pair(NodePos{-1, false}, -1));
+		alnLastValid.resize(pair.second.size(), std::make_pair(NodePos{-1, false}, -1));
+		for (size_t i = 0; i < pair.second.size(); i++)
+		{
+			if (longNodes.count(pair.second[i].path().mapping(0).position().node_id()) == 1)
+			{
+				if (pair.second[i].path().mapping(0).position().offset() <= 64)
+				{
+					alnFirstValid[i].first.id = pair.second[i].path().mapping(0).position().node_id();
+					alnFirstValid[i].first.end = pair.second[i].path().mapping(0).position().is_reverse();
+					alnFirstValid[i].second = pair.second[i].query_position();
+				}
+			}
+			int lastIndex = pair.second[i].path().mapping_size() - 1;
+			if (longNodes.count(pair.second[i].path().mapping(lastIndex).position().node_id()) == 1)
+			{
+				if (pair.second[i].path().mapping(lastIndex).position().offset() + pair.second[i].path().mapping(lastIndex).edit(0).from_length() >= graph.nodes.at(pair.second[i].path().mapping(lastIndex).position().node_id()).size()-64)
+				{
+					alnLastValid[i].first.id = pair.second[i].path().mapping(lastIndex).position().node_id();
+					alnLastValid[i].first.end = pair.second[i].path().mapping(lastIndex).position().is_reverse();
+					alnLastValid[i].second = pair.second[i].query_position() + pair.second[i].sequence().size();
+				}
+			}
+		}
+		for (size_t i = 0; i < pair.second.size(); i++)
+		{
+			if (alnFirstValid[i].first.id == -1) continue;
+			for (size_t j = i-1; j < pair.second.size(); j--)
+			{
+				if (alnLastValid[j].first.id == -1) continue;
+				if (alnLastValid[j].first.id == alnFirstValid[i].first.id) continue;
+				if (alnLastValid[j].second >= alnFirstValid[i].second) continue;
+				result.emplace_back(alnLastValid[j].first, alnFirstValid[i].first, false, readseq.substr(alnLastValid[j].second, alnFirstValid[i].second - alnLastValid[j].second));
+				break;
+			}
+		}
+	}
+	return result;
+}
+
+std::vector<std::tuple<NodePos, NodePos, bool, std::string>> pickPrimaryAndSecondaryConnectors(const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& primaries, const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& secondaries)
+{
+	std::unordered_set<int> hasPrimaryRightEdge;
+	std::unordered_set<int> hasPrimaryLeftEdge;
+	for (auto connector : primaries)
+	{
+		if (std::get<0>(connector).end)
+		{
+			hasPrimaryRightEdge.insert(std::get<0>(connector).id);
+		}
+		else
+		{
+			hasPrimaryLeftEdge.insert(std::get<0>(connector).id);
+		}
+		if (std::get<1>(connector).end)
+		{
+			hasPrimaryLeftEdge.insert(std::get<1>(connector).id);
+		}
+		else
+		{
+			hasPrimaryRightEdge.insert(std::get<1>(connector).id);
+		}
+	}
+	std::vector<std::tuple<NodePos, NodePos, bool, std::string>> result = primaries;
+	for (auto connector : secondaries)
+	{
+		if (std::get<0>(connector).end)
+		{
+			if (hasPrimaryRightEdge.count(std::get<0>(connector).id) == 1) continue;
+		}
+		else
+		{
+			if (hasPrimaryLeftEdge.count(std::get<0>(connector).id) == 1) continue;
+		}
+		if (std::get<1>(connector).end)
+		{
+			if (hasPrimaryLeftEdge.count(std::get<1>(connector).id) == 1) continue;
+		}
+		else
+		{
+			if (hasPrimaryRightEdge.count(std::get<1>(connector).id) == 1) continue;
+		}
+		result.push_back(connector);
+	}
+	return result;
+}
+
 int main(int argc, char** argv)
 {
 	std::string alnfile { argv[1] };
 	std::string graphfile { argv[2] };
-	int minLongnodeLength = std::stoi(argv[3]);
-	int minLongnodeAlnlen = std::stoi(argv[4]);
-	std::string outputGraphFile { argv[5] };
+	std::string readsfile { argv[3] };
+	int minLongnodeLength = std::stoi(argv[4]);
+	int minLongnodeAlnlen = std::stoi(argv[5]);
+	std::string outputGraphFile { argv[6] };
 
 	auto alns = CommonUtils::LoadVGAlignments(alnfile);
+	auto reads = loadFastqFromFile(readsfile);
 	auto graph = GfaGraph::LoadFromFile(graphfile);
 	auto longNodes = getLongNodes(graph, minLongnodeLength);
 	auto parts = splitAlnsToParts(alns, longNodes, minLongnodeAlnlen);
 	auto connectors = getConnectingNodes(parts, longNodes, graph);
 	auto canon = canonizePaths(connectors);
 	auto uniques = pickUniquePaths(canon);
-	makeGraphAndWrite(uniques, longNodes, graph, outputGraphFile);
+	auto secondaries = getSecondaryConnectors(alns, reads, longNodes, minLongnodeAlnlen, graph);
+	auto canonSecondaries = canonizePaths(secondaries);
+	auto merged = pickPrimaryAndSecondaryConnectors(uniques, canonSecondaries);
+	makeGraphAndWrite(merged, longNodes, graph, outputGraphFile);
 }

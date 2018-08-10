@@ -129,6 +129,56 @@ void GfaGraph::AddSubgraph(const GfaGraph& other)
 	}
 }
 
+void GfaGraph::confirmDoublesidedEdges()
+{
+	for (auto node : nodes)
+	{
+		NodePos source;
+		source.id = node.first;
+		source.end = true;
+		NodePos revSource = source;
+		revSource.end = false;
+		auto targets = edges[source];
+		for (auto target : targets)
+		{
+			bool found = false;
+			auto revTarget = target;
+			revTarget.end = !revTarget.end;
+			for (auto check : edges[revTarget])
+			{
+				if (check == revSource)
+				{
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+			{
+				edges[revTarget].emplace_back(revSource);
+			}
+		}
+		targets = edges[revSource];
+		for (auto target : targets)
+		{
+			bool found = false;
+			auto revTarget = target;
+			revTarget.end = !revTarget.end;
+			for (auto check : edges[revTarget])
+			{
+				if (check == source)
+				{
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+			{
+				edges[revTarget].emplace_back(source);
+			}
+		}
+	}
+}
+
 GfaGraph GfaGraph::LoadFromFile(std::string filename)
 {
 	GfaGraph result;

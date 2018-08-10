@@ -46,6 +46,7 @@ public:
 	void AddSubgraph(const GfaGraph& subgraph);
 	GfaGraph GetSubgraph(const std::unordered_set<int>& ids) const;
 	GfaGraph GetSubgraph(const std::unordered_set<int>& nodes, const std::unordered_set<std::pair<NodePos, NodePos>>& edges) const;
+	void confirmDoublesidedEdges();
 	std::unordered_map<int, std::string> nodes;
 	std::unordered_map<NodePos, std::vector<NodePos>> edges;
 	int edgeOverlap;
