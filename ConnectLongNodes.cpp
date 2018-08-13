@@ -164,23 +164,31 @@ std::vector<std::tuple<NodePos, NodePos, bool, std::string>> getSecondaryConnect
 		alnLastValid.resize(pair.second.size(), std::make_pair(NodePos{-1, false}, -1));
 		for (size_t i = 0; i < pair.second.size(); i++)
 		{
-			if (longNodes.count(pair.second[i].path().mapping(0).position().node_id()) == 1)
+			if (pair.second[i].sequence().size() < minLen) continue;
+			for (int j = 0; j < pair.second[i].path().mapping_size(); j++)
 			{
-				if (pair.second[i].path().mapping(0).position().offset() <= 64)
+				if (longNodes.count(pair.second[i].path().mapping(j).position().node_id()) == 1)
 				{
-					alnFirstValid[i].first.id = pair.second[i].path().mapping(0).position().node_id();
-					alnFirstValid[i].first.end = pair.second[i].path().mapping(0).position().is_reverse();
-					alnFirstValid[i].second = pair.second[i].query_position();
+					if (pair.second[i].path().mapping(j).position().offset() <= 64)
+					{
+						alnFirstValid[i].first.id = pair.second[i].path().mapping(j).position().node_id();
+						alnFirstValid[i].first.end = pair.second[i].path().mapping(j).position().is_reverse();
+						alnFirstValid[i].second = pair.second[i].query_position();
+						break;
+					}
 				}
 			}
-			int lastIndex = pair.second[i].path().mapping_size() - 1;
-			if (longNodes.count(pair.second[i].path().mapping(lastIndex).position().node_id()) == 1)
+			for (int j = pair.second[i].path().mapping_size()-1; j >= 0; j--)
 			{
-				if (pair.second[i].path().mapping(lastIndex).position().offset() + pair.second[i].path().mapping(lastIndex).edit(0).from_length() >= graph.nodes.at(pair.second[i].path().mapping(lastIndex).position().node_id()).size()-64)
+				if (longNodes.count(pair.second[i].path().mapping(j).position().node_id()) == 1)
 				{
-					alnLastValid[i].first.id = pair.second[i].path().mapping(lastIndex).position().node_id();
-					alnLastValid[i].first.end = pair.second[i].path().mapping(lastIndex).position().is_reverse();
-					alnLastValid[i].second = pair.second[i].query_position() + pair.second[i].sequence().size();
+					if (pair.second[i].path().mapping(j).position().offset() + pair.second[i].path().mapping(j).edit(0).from_length() >= graph.nodes.at(pair.second[i].path().mapping(j).position().node_id()).size()-64)
+					{
+						alnLastValid[i].first.id = pair.second[i].path().mapping(j).position().node_id();
+						alnLastValid[i].first.end = pair.second[i].path().mapping(j).position().is_reverse();
+						alnLastValid[i].second = pair.second[i].query_position() + pair.second[i].sequence().size();
+						break;
+					}
 				}
 			}
 		}
