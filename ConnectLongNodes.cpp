@@ -134,6 +134,21 @@ std::vector<std::tuple<NodePos, NodePos, bool, std::string>> canonizePaths(const
 	return result;
 }
 
+std::vector<std::tuple<NodePos, NodePos, bool, std::string>> pickOneArbitraryConnectorPerBubble(const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& paths)
+{
+	std::unordered_map<std::pair<NodePos, NodePos>, std::tuple<NodePos, NodePos, bool, std::string>> arbitraries;
+	for (auto path : paths)
+	{
+		arbitraries[std::make_pair(std::get<0>(path), std::get<1>(path))] = path;
+	}
+	std::vector<std::tuple<NodePos, NodePos, bool, std::string>> result;
+	for (auto pair : arbitraries)
+	{
+		result.push_back(pair.second);
+	}
+	return result;
+}
+
 std::vector<std::tuple<NodePos, NodePos, bool, std::string>> pickUniquePaths(const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& paths)
 {
 	std::set<std::tuple<NodePos, NodePos, bool, std::string>> uniques { paths.begin(), paths.end() };
@@ -200,7 +215,16 @@ std::vector<std::tuple<NodePos, NodePos, bool, std::string>> getSecondaryConnect
 				if (alnLastValid[j].first.id == -1) continue;
 				if (alnLastValid[j].first.id == alnFirstValid[i].first.id) continue;
 				if (alnLastValid[j].second >= alnFirstValid[i].second) continue;
-				result.emplace_back(alnLastValid[j].first, alnFirstValid[i].first, false, readseq.substr(alnLastValid[j].second, alnFirstValid[i].second - alnLastValid[j].second));
+				std::string seq;
+				seq = graph.nodes.at(alnLastValid[j].first.id);
+				if (alnLastValid[j].first.end) seq = CommonUtils::ReverseComplement(seq);
+				seq = seq.substr(seq.size()-graph.edgeOverlap);
+				seq += readseq.substr(alnLastValid[j].second, alnFirstValid[i].second - alnLastValid[j].second);
+				std::string otherNodeSeq;
+				otherNodeSeq = graph.nodes.at(alnFirstValid[i].first.id);
+				if (alnFirstValid[i].first.end) otherNodeSeq = CommonUtils::ReverseComplement(otherNodeSeq);
+				seq += otherNodeSeq.substr(0, graph.edgeOverlap);
+				result.emplace_back(alnLastValid[j].first, alnFirstValid[i].first, false, seq);
 				break;
 			}
 		}
@@ -272,8 +296,10 @@ int main(int argc, char** argv)
 	auto connectors = getConnectingNodes(parts, longNodes, graph);
 	auto canon = canonizePaths(connectors);
 	auto uniques = pickUniquePaths(canon);
+	auto arbitraryOne = pickOneArbitraryConnectorPerBubble(canon);
 	auto secondaries = getSecondaryConnectors(alns, reads, longNodes, minLongnodeAlnlen, graph);
 	auto canonSecondaries = canonizePaths(secondaries);
-	auto merged = pickPrimaryAndSecondaryConnectors(uniques, canonSecondaries);
+	auto arbitrarySecond = pickOneArbitraryConnectorPerBubble(canonSecondaries);
+	auto merged = pickPrimaryAndSecondaryConnectors(arbitraryOne, arbitrarySecond);
 	makeGraphAndWrite(merged, longNodes, graph, outputGraphFile);
 }
