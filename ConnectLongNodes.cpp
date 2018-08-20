@@ -1,3 +1,4 @@
+#include <iostream>
 #include <algorithm>
 #include <fstream>
 #include "fastqloader.h"
@@ -232,6 +233,21 @@ std::vector<std::tuple<NodePos, NodePos, bool, std::string>> getSecondaryConnect
 	return result;
 }
 
+std::vector<std::tuple<NodePos, NodePos, bool, std::string>> pickHighCoverageBubbles(const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& paths, size_t minCoverage)
+{
+	std::unordered_map<std::pair<NodePos, NodePos>, std::vector<std::tuple<NodePos, NodePos, bool, std::string>>> perBubble;
+	for (auto path : paths)
+	{
+		perBubble[std::make_pair(std::get<0>(path), std::get<1>(path))].emplace_back(path);
+	}
+	std::vector<std::tuple<NodePos, NodePos, bool, std::string>> result;
+	for (auto pair : perBubble)
+	{
+		if (pair.second.size() >= minCoverage) result.insert(result.end(), pair.second.begin(), pair.second.end());
+	}
+	return result;
+}
+
 std::vector<std::tuple<NodePos, NodePos, bool, std::string>> pickPrimaryAndSecondaryConnectors(const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& primaries, const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& secondaries)
 {
 	std::unordered_set<int> hasPrimaryRightEdge;
@@ -256,6 +272,7 @@ std::vector<std::tuple<NodePos, NodePos, bool, std::string>> pickPrimaryAndSecon
 		}
 	}
 	std::vector<std::tuple<NodePos, NodePos, bool, std::string>> result = primaries;
+	size_t added = 0;
 	for (auto connector : secondaries)
 	{
 		if (std::get<0>(connector).end)
@@ -275,7 +292,9 @@ std::vector<std::tuple<NodePos, NodePos, bool, std::string>> pickPrimaryAndSecon
 			if (hasPrimaryRightEdge.count(std::get<1>(connector).id) == 1) continue;
 		}
 		result.push_back(connector);
+		added++;
 	}
+	std::cerr << "added " << added << std::endl;
 	return result;
 }
 
@@ -295,11 +314,25 @@ int main(int argc, char** argv)
 	auto parts = splitAlnsToParts(alns, longNodes, minLongnodeAlnlen);
 	auto connectors = getConnectingNodes(parts, longNodes, graph);
 	auto canon = canonizePaths(connectors);
+	auto hicovConnectors_3 = pickHighCoverageBubbles(canon, 5);
+	auto hicovConnectors_2 = pickHighCoverageBubbles(canon, 2);
 	auto uniques = pickUniquePaths(canon);
 	auto arbitraryOne = pickOneArbitraryConnectorPerBubble(canon);
+	auto arbitraryHicov_3 = pickOneArbitraryConnectorPerBubble(hicovConnectors_3);
+	auto arbitraryHicov_2 = pickOneArbitraryConnectorPerBubble(hicovConnectors_2);
+	std::cerr << "start with " << arbitraryHicov_3.size() << std::endl;
+	auto merged = pickPrimaryAndSecondaryConnectors(arbitraryHicov_3, hicovConnectors_2);
+	merged = pickPrimaryAndSecondaryConnectors(merged, arbitraryOne);
 	auto secondaries = getSecondaryConnectors(alns, reads, longNodes, minLongnodeAlnlen, graph);
 	auto canonSecondaries = canonizePaths(secondaries);
+	auto hicovSecondaries_3 = pickHighCoverageBubbles(canonSecondaries, 5);
+	auto hicovSecondaries_2 = pickHighCoverageBubbles(canonSecondaries, 2);
 	auto arbitrarySecond = pickOneArbitraryConnectorPerBubble(canonSecondaries);
-	auto merged = pickPrimaryAndSecondaryConnectors(arbitraryOne, arbitrarySecond);
+	auto arbitrarySecondHicov_3 = pickOneArbitraryConnectorPerBubble(hicovSecondaries_3);
+	auto arbitrarySecondHicov_2 = pickOneArbitraryConnectorPerBubble(hicovSecondaries_2);
+	merged = pickPrimaryAndSecondaryConnectors(merged, arbitrarySecondHicov_3);
+	merged = pickPrimaryAndSecondaryConnectors(merged, arbitrarySecondHicov_2);
+	merged = pickPrimaryAndSecondaryConnectors(merged, arbitrarySecond);
 	makeGraphAndWrite(merged, longNodes, graph, outputGraphFile);
+	// makeGraphAndWrite(arbitraryOne, longNodes, graph, outputGraphFile);
 }
