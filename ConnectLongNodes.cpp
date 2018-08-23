@@ -15,12 +15,16 @@ bool operator<(const NodePos& left, const NodePos& right)
 	return left.id < right.id || (left.id == right.id && !left.end && right.end);
 }
 
-std::unordered_set<int> getLongNodes(const GfaGraph& graph, int minLen)
+std::unordered_set<int> getLongNodes(std::string filename)
 {
 	std::unordered_set<int> result;
-	for (auto node : graph.nodes)
+	std::ifstream file { filename };
+	while (file.good())
 	{
-		if (node.second.size() >= minLen) result.insert(node.first);
+		int id;
+		file >> id;
+		if (!file.good()) break;
+		result.insert(id);
 	}
 	return result;
 }
@@ -183,29 +187,23 @@ std::vector<std::tuple<NodePos, NodePos, bool, std::string>> getSecondaryConnect
 			if (pair.second[i].sequence().size() < minLen) continue;
 			for (int j = 0; j < pair.second[i].path().mapping_size(); j++)
 			{
-				if (longNodes.count(pair.second[i].path().mapping(j).position().node_id()) == 1)
-				{
-					if (pair.second[i].path().mapping(j).position().offset() <= 64)
-					{
-						alnFirstValid[i].first.id = pair.second[i].path().mapping(j).position().node_id();
-						alnFirstValid[i].first.end = pair.second[i].path().mapping(j).position().is_reverse();
-						alnFirstValid[i].second = pair.second[i].query_position();
-						break;
-					}
-				}
+				if ((j == 0 || j == pair.second[i].path().mapping_size()-1) && pair.second[i].path().mapping(j).edit(0).from_length() < minLen) continue;
+				if (longNodes.count(pair.second[i].path().mapping(j).position().node_id()) != 1) continue;
+				if (pair.second[i].path().mapping(j).position().offset() > 64) continue;
+				alnFirstValid[i].first.id = pair.second[i].path().mapping(j).position().node_id();
+				alnFirstValid[i].first.end = pair.second[i].path().mapping(j).position().is_reverse();
+				alnFirstValid[i].second = pair.second[i].query_position();
+				break;
 			}
 			for (int j = pair.second[i].path().mapping_size()-1; j >= 0; j--)
 			{
-				if (longNodes.count(pair.second[i].path().mapping(j).position().node_id()) == 1)
-				{
-					if (pair.second[i].path().mapping(j).position().offset() + pair.second[i].path().mapping(j).edit(0).from_length() >= graph.nodes.at(pair.second[i].path().mapping(j).position().node_id()).size()-64)
-					{
-						alnLastValid[i].first.id = pair.second[i].path().mapping(j).position().node_id();
-						alnLastValid[i].first.end = pair.second[i].path().mapping(j).position().is_reverse();
-						alnLastValid[i].second = pair.second[i].query_position() + pair.second[i].sequence().size();
-						break;
-					}
-				}
+				if ((j == 0 || j == pair.second[i].path().mapping_size()-1) && pair.second[i].path().mapping(j).edit(0).from_length() < minLen) continue;
+				if (longNodes.count(pair.second[i].path().mapping(j).position().node_id()) != 1) continue;
+				if (pair.second[i].path().mapping(j).position().offset() + pair.second[i].path().mapping(j).edit(0).from_length() < graph.nodes.at(pair.second[i].path().mapping(j).position().node_id()).size()-64) continue;
+				alnLastValid[i].first.id = pair.second[i].path().mapping(j).position().node_id();
+				alnLastValid[i].first.end = pair.second[i].path().mapping(j).position().is_reverse();
+				alnLastValid[i].second = pair.second[i].query_position() + pair.second[i].sequence().size();
+				break;
 			}
 		}
 		for (size_t i = 0; i < pair.second.size(); i++)
@@ -303,17 +301,19 @@ int main(int argc, char** argv)
 	std::string alnfile { argv[1] };
 	std::string graphfile { argv[2] };
 	std::string readsfile { argv[3] };
-	int minLongnodeLength = std::stoi(argv[4]);
+	std::string longnodeFile { argv[4] };
 	int minLongnodeAlnlen = std::stoi(argv[5]);
 	std::string outputGraphFile { argv[6] };
 
 	auto alns = CommonUtils::LoadVGAlignments(alnfile);
 	auto reads = loadFastqFromFile(readsfile);
 	auto graph = GfaGraph::LoadFromFile(graphfile);
-	auto longNodes = getLongNodes(graph, minLongnodeLength);
+	auto longNodes = getLongNodes(longnodeFile);
 	auto parts = splitAlnsToParts(alns, longNodes, minLongnodeAlnlen);
 	auto connectors = getConnectingNodes(parts, longNodes, graph);
 	auto canon = canonizePaths(connectors);
+	auto secondaries = getSecondaryConnectors(alns, reads, longNodes, minLongnodeAlnlen, graph);
+	auto canonSecondaries = canonizePaths(secondaries);
 	auto hicovConnectors_3 = pickHighCoverageBubbles(canon, 5);
 	auto hicovConnectors_2 = pickHighCoverageBubbles(canon, 2);
 	auto uniques = pickUniquePaths(canon);
@@ -323,8 +323,6 @@ int main(int argc, char** argv)
 	std::cerr << "start with " << arbitraryHicov_3.size() << std::endl;
 	auto merged = pickPrimaryAndSecondaryConnectors(arbitraryHicov_3, hicovConnectors_2);
 	merged = pickPrimaryAndSecondaryConnectors(merged, arbitraryOne);
-	auto secondaries = getSecondaryConnectors(alns, reads, longNodes, minLongnodeAlnlen, graph);
-	auto canonSecondaries = canonizePaths(secondaries);
 	auto hicovSecondaries_3 = pickHighCoverageBubbles(canonSecondaries, 5);
 	auto hicovSecondaries_2 = pickHighCoverageBubbles(canonSecondaries, 2);
 	auto arbitrarySecond = pickOneArbitraryConnectorPerBubble(canonSecondaries);
@@ -333,6 +331,7 @@ int main(int argc, char** argv)
 	merged = pickPrimaryAndSecondaryConnectors(merged, arbitrarySecondHicov_3);
 	merged = pickPrimaryAndSecondaryConnectors(merged, arbitrarySecondHicov_2);
 	merged = pickPrimaryAndSecondaryConnectors(merged, arbitrarySecond);
+
 	makeGraphAndWrite(merged, longNodes, graph, outputGraphFile);
 	// makeGraphAndWrite(arbitraryOne, longNodes, graph, outputGraphFile);
 }

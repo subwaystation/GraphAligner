@@ -1,6 +1,6 @@
 CC=gcc
 GPP=g++
-CPPFLAGS=-Wall -std=c++14 -O3 -g
+CPPFLAGS=-Wall -std=c++14 -O0 -g
 
 ODIR=obj
 BINDIR=bin
@@ -82,6 +82,9 @@ $(BINDIR)/ConnectLongNodes: ConnectLongNodes.cpp $(ODIR)/CommonUtils.o $(ODIR)/v
 	$(GPP) -o $@ $^ $(LINKFLAGS)
 
 $(BINDIR)/SimplifyConnectGraph: SimplifyConnectGraph.cpp $(ODIR)/CommonUtils.o $(ODIR)/vg.pb.o $(ODIR)/GfaGraph.o $(ODIR)/fastqloader.o $(ODIR)/ThreadReadAssertion.o
+	$(GPP) -o $@ $^ $(LINKFLAGS)
+
+$(BINDIR)/LongBubblechainsFromSnarls: LongBubblechainsFromSnarls.cpp $(ODIR)/CommonUtils.o $(ODIR)/vg.pb.o $(ODIR)/GfaGraph.o $(ODIR)/fastqloader.o $(ODIR)/ThreadReadAssertion.o
 	$(GPP) -o $@ $^ $(LINKFLAGS)
 
 all: $(BINDIR)/Aligner $(BINDIR)/SimulateReads $(BINDIR)/ReverseReads $(BINDIR)/SupportedSubgraph $(BINDIR)/MafToAlignment $(BINDIR)/ExtractPathSequence $(BINDIR)/ExtractPathSubgraphNeighbourhood $(BINDIR)/VisualizeAlignment $(BINDIR)/NodePosCsv $(BINDIR)/ExtractExactPathSubgraph $(BINDIR)/EstimateRepeatCount $(BINDIR)/PickMummerSeeds $(BINDIR)/SelectLongestAlignment $(BINDIR)/Postprocess $(BINDIR)/AlignmentSubsequenceIdentity $(BINDIR)/BruteForceExactPrefixSeeds
