@@ -126,9 +126,9 @@ std::vector<std::tuple<NodePos, NodePos, bool, std::string>> canonizePaths(const
 		auto end = std::get<1>(path);
 		if (start > end)
 		{
-			end.end = !end.end;
-			start.end = !start.end;
-			assert(!(end > start));
+			end = end.Reverse();
+			start = start.Reverse();
+			assert(!(end > start) || end.Reverse() == start);
 			result.emplace_back(end, start, std::get<2>(path), CommonUtils::ReverseComplement(std::get<3>(path)));
 		}
 		else
