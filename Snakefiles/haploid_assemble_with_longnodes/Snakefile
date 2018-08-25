@@ -48,15 +48,15 @@ rule run_bcalm2:
 	input:
 		"filelist"
 	output:
-		temp("filelist_k{k}_a{a}.unitigs.fa")
+		"tmp/filelist_k{k}_a{a}.unitigs.fa"
 	shadow: "shallow"
 	threads: 8
 	shell:
-		"{BCALMPATH} -in {input} -out filelist_k{wildcards.k}_a{wildcards.a} -kmer-size {wildcards.k} -abundance-min {wildcards.a} -nb-cores {threads}"
+		"{BCALMPATH} -in {input} -out tmp/filelist_k{wildcards.k}_a{wildcards.a} -kmer-size {wildcards.k} -abundance-min {wildcards.a} -nb-cores {threads}"
 
 rule filter_unitig_coverage:
 	input:
-		"filelist_k{k}_a{a}.unitigs.fa"
+		"tmp/filelist_k{k}_a{a}.unitigs.fa"
 	output:
 		temp("tmp/filelist_k{k}_a{a}_u{u}.unitigs.fa")
 	shell:
@@ -153,7 +153,9 @@ rule assembly_stats:
 		shell("echo 'Number of edges in the assembly:' >> {output}")
 		shell("grep -P '^L' < {input.graph} | wc -l >> {output}")
 		shell("echo 'Longest contig in the assembly:' >> {output}")
-		shell("grep -P '^S' < {input.graph} | cut -f 3 | awk '{{size = max(size, length($0));}}END{{print size;}' >> {output}")
+		shell("grep -P '^S' < {input.graph} | cut -f 3 | wc -L >> {output}")
+		shell("echo 'N50:' >> {output}")
+		shell("grep -P '^S' < {input.graph} | cut -f 3 | awk '{{print length($0);}}' | python {SCRIPTPATH}/contiglen_N50.py >> {output}")
 
 rule unitigify_assembly:
 	input:
