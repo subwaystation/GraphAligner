@@ -147,15 +147,15 @@ rule assembly_stats:
 		shell("grep 'Percent of CPU this job got:' {input.stats} >> {output}"),
 		shell("grep 'Elapsed (wall clock) time (h:mm:ss or m:ss):' {input.stats} >> {output}"),
 		shell("echo 'Number of base pairs in the assembly:' >> {output}")
-		shell("grep -P '^S' < {input.graph} | cut -f 3 | awk '{{size += length($0);}}END{{print size;}}' >> {output}")
+		shell("(grep -P '^S' || true) < {input.graph} | cut -f 3 | awk '{{size += length($0);}}END{{print size;}}' >> {output}")
 		shell("echo 'Number of contigs in the assembly:' >> {output}")
-		shell("grep -P '^S' < {input.graph} | wc -l >> {output}")
+		shell("(grep -P '^S' || true) < {input.graph} | wc -l >> {output}")
 		shell("echo 'Number of edges in the assembly:' >> {output}")
-		shell("grep -P '^L' < {input.graph} | wc -l >> {output}")
+		shell("(grep -P '^L' || true) < {input.graph} | wc -l >> {output}")
 		shell("echo 'Longest contig in the assembly:' >> {output}")
-		shell("grep -P '^S' < {input.graph} | cut -f 3 | wc -L >> {output}")
+		shell("(grep -P '^S' || true) < {input.graph} | cut -f 3 | wc -L >> {output}")
 		shell("echo 'N50:' >> {output}")
-		shell("grep -P '^S' < {input.graph} | cut -f 3 | awk '{{print length($0);}}' | python {SCRIPTPATH}/contiglen_N50.py >> {output}")
+		shell("(grep -P '^S' || true) < {input.graph} | cut -f 3 | awk '{{print length($0);}}' | python {SCRIPTPATH}/contiglen_N50.py >> {output}")
 
 rule unitigify_assembly:
 	input:
