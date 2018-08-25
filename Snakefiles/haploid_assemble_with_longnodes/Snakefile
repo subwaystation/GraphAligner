@@ -49,7 +49,7 @@ rule run_bcalm2:
 		"filelist"
 	output:
 		"tmp/filelist_k{k}_a{a}.unitigs.fa"
-	shadow: "shallow"
+	shadow: "full"
 	threads: 8
 	shell:
 		"{BCALMPATH} -in {input} -out tmp/filelist_k{wildcards.k}_a{wildcards.a} -kmer-size {wildcards.k} -abundance-min {wildcards.a} -nb-cores {threads}"
