@@ -1,0 +1,222 @@
+# Edit config.yaml to add the paths before running
+configfile: "config.yaml"
+MUMMERPATH = config["mummerpath"]
+LONGREADS = config["longreads"]
+SHORTREADS = config["shortreads"]
+SEEDSIZE = config["seedsize"]
+MAXSEEDHITS = config["maxseeds"]
+LONGNODESIZE = config["longnodesize"]
+ALIGNMENTOVERLAPSIZE = config["alignmentoverlapsize"]
+ALIGNERPARAMS = config["aligner_params"]
+ALIGNERBINPATH = config["graphalignerfolder"] + "bin"
+SCRIPTPATH = config["graphalignerfolder"] + "scripts"
+BCALMPATH = config["bcalmpath"]
+CONVERTTOGFAPATH = config["bcalm_converttoGFApath"]
+VGPATH = config["vgpath"]
+
+wildcard_constraints:
+	graphname = "k\d+_a\d+_u\d+",
+	k = "\d+",
+	a = "\d+",
+	u = "\d+",
+	longnodesize = "\d+",
+	overlapsize = "\d+",
+	longreads = "[^_]+",
+	shortreads = "[^_]+"
+
+rule all:
+	input:
+		expand("output/assemblystats_k{k}_a{a}_u{u}_ls{longnodesize}_o{overlapsize}.txt", k=config["k"], a=config["kmer_abundance"], u=config["unitig_abundance"], longnodesize=LONGNODESIZE, overlapsize=ALIGNMENTOVERLAPSIZE),
+		expand("output/assembly_k{k}_a{a}_u{u}_ls{longnodesize}_o{overlapsize}_unitig.gfa", k=config["k"], a=config["kmer_abundance"], u=config["unitig_abundance"], longnodesize=LONGNODESIZE, overlapsize=ALIGNMENTOVERLAPSIZE),
+		expand("output/alignmentstats_k{k}_a{a}_u{u}.txt", k=config["k"], a=config["kmer_abundance"], u=config["unitig_abundance"], longreads=LONGREADS)
+
+rule merge_reads:
+	input:
+		files = expand("input/{longreads}.fasta", longreads=LONGREADS)
+	output:
+		"tmp/longreads_merged.fasta"
+	shell:
+		"cat {input.files} > {output}"
+
+rule format_input_files:
+	output:
+		temp("filelist")
+	shell:
+		"printf '%s\\n' {SHORTREADS} > {output}"
+
+rule run_bcalm2:
+	input:
+		"filelist"
+	output:
+		temp("filelist_k{k}_a{a}.unitigs.fa")
+	shadow: "shallow"
+	threads: 8
+	shell:
+		"{BCALMPATH} -in {input} -out filelist_k{wildcards.k}_a{wildcards.a} -kmer-size {wildcards.k} -abundance-min {wildcards.a} -nb-cores {threads}"
+
+rule filter_unitig_coverage:
+	input:
+		"filelist_k{k}_a{a}.unitigs.fa"
+	output:
+		temp("tmp/filelist_k{k}_a{a}_u{u}.unitigs.fa")
+	shell:
+		"python {SCRIPTPATH}/filter_bcalm_by_frequency.py {input} {wildcards.u} {output}"
+
+rule convert_graph:
+	input:
+		"tmp/filelist_k{k}_a{a}_u{u}.unitigs.fa"
+	output:
+		temp("tmp/graph_k{k}_a{a}_u{u}_tipped.gfa")
+	shell:
+		"{CONVERTTOGFAPATH} {input} {output} {wildcards.k}"
+
+rule untip_graph:
+	input:
+		"tmp/graph_k{k}_a{a}_u{u}_tipped.gfa"
+	output:
+		temp("tmp/graph_k{k}_a{a}_u{u}_untip.gfa")
+	shell:
+		"{ALIGNERBINPATH}/UntipRelative 1000 100 0.1 < {input} > {output}"
+
+rule extract_biggest_component:
+	input:
+		"tmp/graph_k{k}_a{a}_u{u}_untip.gfa"
+	output:
+		temp("tmp/graph_k{k}_a{a}_u{u}_component.gfa")
+	shell:
+		"python {SCRIPTPATH}/extract_gfa_biggest_component.py {input} > {output}"
+
+rule get_contigs:
+	input:
+		"tmp/graph_k{k}_a{a}_u{u}_component.gfa"
+	output:
+		temp("contigs_k{k}_a{a}_u{u}.fa")
+	shell:
+		"grep S < {input} | awk '{{print \">\" $NR; print $3;}}' > {output}"
+
+rule remake_bcalm_from_contigs:
+	input:
+		"contigs_k{k}_a{a}_u{u}.fa"
+	output:
+		temp("contigs_k{k}_a{a}_u{u}.unitigs.fa")
+	shadow: "shallow"
+	threads: 8
+	shell:
+		"{BCALMPATH} -in {input} -out contigs_k{wildcards.k}_a{wildcards.a}_u{wildcards.u} -abundance-min 1 -kmer-size {wildcards.k} -nb-cores {threads}"
+
+rule final_graph:
+	input:
+		"contigs_k{k}_a{a}_u{u}.unitigs.fa"
+	output:
+		"tmp/graph_k{k}_a{a}_u{u}.gfa"
+	shell:
+		"{CONVERTTOGFAPATH} {input} {output} {wildcards.k}"
+
+rule get_long_nodes:
+	input:
+		"tmp/graph_{graphname}.gfa"
+	output:
+		"tmp/longnodes_{graphname}_{longnodesize}.txt"
+	shell:
+		"grep S < {input} | awk '{{if (length($3) >= {wildcards.longnodesize}) print $2;}}' > {output}"
+
+rule assemble_longnodes:
+	input:
+		graph = "tmp/graph_{graphname}.gfa",
+		alns = "tmp/aln_{graphname}_merged.gam",
+		longnodes = "tmp/longnodes_{graphname}_{longnodesize}.txt",
+		reads = "tmp/longreads_merged.fasta"
+	output:
+		graph = "tmp/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_raw.gfa",
+		stats = "tmp/assemblystats_{graphname}_ls{longnodesize}_o{overlapsize}.txt"
+	shell:
+		"/usr/bin/time -v {ALIGNERBINPATH}/ConnectLongNodes {input.alns} {input.graph} {input.reads} {input.longnodes} {wildcards.overlapsize} {output.graph} 2> {output.stats}"
+
+rule assembly_stats:
+	input:
+		stats = "tmp/assemblystats_{graphname}_ls{longnodesize}_o{overlapsize}.txt",
+		graph = "output/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_unitig.gfa"
+	output:
+		"output/assemblystats_{graphname}_ls{longnodesize}_o{overlapsize}.txt"
+	run:
+		shell("touch {output}")
+		shell("grep 'Command being timed:' {input.stats} >> {output}"),
+		shell("grep 'User time (seconds):' {input.stats} >> {output}"),
+		shell("grep 'System time (seconds):' {input.stats} >> {output}"),
+		shell("grep 'Maximum resident set size (kbytes):' {input.stats} >> {output}"),
+		shell("grep 'Percent of CPU this job got:' {input.stats} >> {output}"),
+		shell("grep 'Elapsed (wall clock) time (h:mm:ss or m:ss):' {input.stats} >> {output}"),
+		shell("echo 'Number of base pairs in the assembly:' >> {output}")
+		shell("grep -P '^S' < {input.graph} | cut -f 3 | awk '{{size += length($0);}}END{{print size;}}' >> {output}")
+		shell("echo 'Number of contigs in the assembly:' >> {output}")
+		shell("grep -P '^S' < {input.graph} | wc -l >> {output}")
+		shell("echo 'Number of edges in the assembly:' >> {output}")
+		shell("grep -P '^L' < {input.graph} | wc -l >> {output}")
+		shell("echo 'Longest contig in the assembly:' >> {output}")
+		shell("grep -P '^S' < {input.graph} | cut -f 3 | awk '{{size = max(size, length($0));}}END{{print size;}' >> {output}")
+
+rule unitigify_assembly:
+	input:
+		"tmp/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_raw.gfa"
+	output:
+		"output/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_unitig.gfa"
+	shell:
+		"{VGPATH} view -Fv {input} | {VGPATH} mod -u - | {VGPATH} view - > {output}"
+
+rule make_graphreference:
+	input:
+		"tmp/graph_{graphname}.gfa"
+	output:
+		reference = "tmp/graph_{graphname}_gfareference.fa",
+		refnodes = "tmp/graph_{graphname}_refnodes.txt"
+	shell:
+		"python {SCRIPTPATH}/makegfareference.py {input} {output.refnodes} {output.reference}"
+
+rule reverse_reads:
+	input:
+		"tmp/longreads_merged.fasta"
+	output:
+		"tmp/longreads_merged_reverse.fasta"
+	shell:
+		"{ALIGNERBINPATH}/ReverseReads {input} {output}"
+
+rule mummer_pipe:
+	input:
+		fwreads = "tmp/longreads_merged.fasta",
+		bwreads = "tmp/longreads_merged_reverse.fasta",
+		reference = "tmp/graph_{graphname}_gfareference.fa"
+	output:
+		"tmp/seeds_{graphname}_picked.gam"
+	threads: 40
+	shell:
+		"{MUMMERPATH} -F -qthreads {threads} -l {SEEDSIZE} {input.reference} {input.fwreads} {input.bwreads} | {ALIGNERBINPATH}/PickMummerSeeds {output} {input.reference} {MAXSEEDHITS} {input.fwreads}"
+
+rule align:
+	input:
+		graph = "tmp/graph_{graphname}.gfa",
+		reads = "tmp/longreads_merged.fasta",
+		seeds = "tmp/seeds_{graphname}_picked.gam"
+	output:
+		alns = "tmp/aln_{graphname}_merged.gam",
+		stdout = "tmp/aligner_stdout_{graphname}.txt",
+		stderr = "tmp/aligner_stderr_{graphname}.txt"
+	threads: 40
+	shell:
+		"/usr/bin/time -v {ALIGNERBINPATH}/Aligner -A {MAXSEEDHITS} -g {input.graph} -f {input.reads} -s {input.seeds} -a {output.alns} -t {threads} {ALIGNERPARAMS} 1> {output.stdout} 2> {output.stderr}"
+
+rule output_statistics:
+	input:
+		stderr = "tmp/aligner_stderr_{graphname}.txt"
+	output:
+		"output/alignmentstats_{graphname}.txt"
+	run:
+		shell("touch {output}"),
+		shell("grep 'commit' {input.stderr} >> {output}")
+		shell("grep 'Command being timed:' {input.stderr} >> {output}"),
+		shell("grep 'User time (seconds):' {input.stderr} >> {output}"),
+		shell("grep 'System time (seconds):' {input.stderr} >> {output}"),
+		shell("grep 'Maximum resident set size (kbytes):' {input.stderr} >> {output}"),
+		shell("grep 'Percent of CPU this job got:' {input.stderr} >> {output}"),
+		shell("grep 'Elapsed (wall clock) time (h:mm:ss or m:ss):' {input.stderr} >> {output}"),
+		shell("echo 'Number of reads broken due to an assertion:' >> {output}"),
+		shell("(grep Assert < {input.stderr} || true) | wc -l >> {output}"),

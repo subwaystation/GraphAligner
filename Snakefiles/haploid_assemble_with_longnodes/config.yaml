@@ -1,0 +1,70 @@
+# Important parameters at top: check them!
+
+# https://github.com/maickrau/GraphAligner
+# root directory of the repo
+graphalignerfolder: path_to_graph_aligner/
+# https://github.com/mummer4/mummer
+# required for seed finding
+mummerpath: path_to_mummer/mummer
+# https://github.com/vgteam/vg/
+# required for graph unitigification
+vgpath: path_to_vg/vg
+# https://github.com/GATB/bcalm
+# required for building the de Bruijn graph
+bcalmpath: path_to_bcalm/bcalm
+# https://github.com/GATB/bcalm
+# bcalm -> gfa conversion script path
+bcalm_converttoGFApath: path_to_bcalm/scripts/converttoGFA.py
+
+# Illumina reads
+# Accepted file formats: https://github.com/GATB/bcalm#input-formats
+# The file names MUST NOT contain underscores _
+shortreads: 
+- ./input/testread-illumina-1.fastq.gz
+- ./input/testread-illumina-2.fastq.gz
+
+# Pacbio or ONT reads
+# The reads must be in input/ folder and in fasta format, eg. ./input/testread-pacbio.fasta
+# The file names MUST NOT contain underscores _
+# Don't include the file ending!
+longreads: 
+- testread-pacbio-1
+- testread-pacbio-2
+
+############################
+
+# Optional params below: default values might work
+
+# Kmer size of the graph
+# This should be very low to prevent fragmentation
+k: 31
+# Minimum kmer abundance of the graph
+# This should be very low
+kmer_abundance: 2
+# Minimum unitig abundance of the graph
+# This should be very low
+unitig_abundance: 5
+# Minimum size of a node considered to be a long node.
+# This is the most important parameter for assembly and determines how fragmented and resolved the assembly will be.
+# If the assembly is fragmented, lower this
+# If the assembly is unresolved, increase.
+longnodesize: 500
+# Minimum size of an alignment's last node's alignment to be considered valid.
+# This has usually very little effect. Values between 100 and 1000 usually work.
+alignmentoverlapsize: 500
+# Size of the seed hits.
+# Try values between 10 - 50 depending on read length and graph size
+seedsize: 51
+# Max number of seeds.
+# Try values between 10 - 100
+maxseeds: 10
+
+# Aligner parameters.
+# -b: Mandatory. Default bandwidth. eg -b 5. Higher means more accurate but slower alignment. Try values between 5-35.
+# -B: Optional. Higher bandwidth. eg -B 10. If aligning at -b fails, use this higher bandwidth at the failing spot. Higher means more accurate but slightly slower. Try values between 10-35.
+# -C: Optional. Max band size. eg -C 1000000. If the band grows higher than this, stop alignment. Use for complex graphs to skip tangles. For simple graphs, leave out, for complex graphs try values between 50'000-5'000'000
+# -u: Optional. Unsafe heuristics. eg -u. Use heuristics which speed up alignment but can lead to inoptimal results.
+# -q: Optional. Quiet mode. eg -q. Print less stuff
+# Example for human genomes: -b 5 -B 10 -C 1000000 -u
+# Example for bacterial genomes: -b 10 -B 20 -C 1000000
+aligner_params: -b 5
