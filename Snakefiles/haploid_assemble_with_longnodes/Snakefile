@@ -132,6 +132,24 @@ rule assemble_longnodes:
 	shell:
 		"/usr/bin/time -v {ALIGNERBINPATH}/ConnectLongNodes {input.alns} {input.graph} {input.reads} {input.longnodes} {wildcards.overlapsize} {output.graph} 2> {output.stats}"
 
+rule remap_alignments_to_londnodes:
+	input:
+		graph = "tmp/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_raw.gfa",
+		alns = "tmp/aln_{graphname}_merged.gam"
+	output:
+		"tmp/aln_{graphname}_ls{longnodesize}_o{overlapsize}.gam"
+	shell:
+		"{ALIGNERBINPATH}/RemapToLongnodegraph {input.graph} {input.alns} {output}"
+
+rule simple_repeat_resolution:
+	input:
+		graph = "tmp/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_raw.gfa",
+		alns = "tmp/aln_{graphname}_ls{longnodesize}_o{overlapsize}.gam"
+	output:
+		"tmp/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_repeatresolved.gfa"
+	shell:
+		"{ALIGNERBINPATH}/ResolveSimpleRepeats {input.graph} {input.alns} {output}"
+
 rule assembly_stats:
 	input:
 		stats = "tmp/assemblystats_{graphname}_ls{longnodesize}_o{overlapsize}.txt",
@@ -159,7 +177,7 @@ rule assembly_stats:
 
 rule unitigify_assembly:
 	input:
-		"tmp/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_raw.gfa"
+		"tmp/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_repeatresolved.gfa"
 	output:
 		"output/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_unitig.gfa"
 	shell:

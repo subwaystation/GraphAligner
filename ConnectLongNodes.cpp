@@ -5,16 +5,6 @@
 #include "GfaGraph.h"
 #include "CommonUtils.h"
 
-bool operator>(const NodePos& left, const NodePos& right)
-{
-	return left.id > right.id || (left.id == right.id && left.end && !right.end);
-}
-
-bool operator<(const NodePos& left, const NodePos& right)
-{
-	return left.id < right.id || (left.id == right.id && !left.end && right.end);
-}
-
 std::unordered_set<int> getLongNodes(std::string filename)
 {
 	std::unordered_set<int> result;

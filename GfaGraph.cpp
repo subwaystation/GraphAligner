@@ -30,6 +30,16 @@ NodePos NodePos::Reverse() const
 	return NodePos { id, !end };
 }
 
+bool NodePos::operator>(const NodePos& right) const
+{
+	return id > right.id || (id == right.id && end && !right.end);
+}
+
+bool NodePos::operator<(const NodePos& right) const
+{
+	return id < right.id || (id == right.id && !end && right.end);
+}
+
 GfaGraph::GfaGraph() :
 nodes(),
 edges(),
