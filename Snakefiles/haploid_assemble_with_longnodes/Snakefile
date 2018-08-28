@@ -36,7 +36,7 @@ rule merge_reads:
 	output:
 		"tmp/longreads_merged.fasta"
 	shell:
-		"cat {input.files} > {output}"
+		"cat {input.files} | python {SCRIPTPATH}/fix_read_format.py > {output}"
 
 rule format_input_files:
 	output:
