@@ -230,6 +230,7 @@ std::vector<std::vector<NodePos>> resolvePaths(const std::vector<std::vector<Nod
 			nodeCrossingThroughPaths[node.id].push_back(i);
 		}
 	}
+	std::set<int> unresolvedNodes;
 	for (auto path : paths)
 	{
 		std::set<size_t> possibleCompatibles;
@@ -247,8 +248,24 @@ std::vector<std::vector<NodePos>> resolvePaths(const std::vector<std::vector<Nod
 			}
 		}
 		if (compatible) continue;
-		// ??? not compatible, what do ???
-		assert(false);
+		for (auto node : path)
+		{
+			unresolvedNodes.insert(node.id);
+		}
+	}
+	std::vector<std::vector<NodePos>> result;
+	for (auto path : throughPaths)
+	{
+		bool resolved = true;
+		for (auto node : path)
+		{
+			if (unresolvedNodes.count(node.id) == 1)
+			{
+				resolved = false;
+				break;
+			}
+		}
+		if (resolved) result.push_back(path);
 	}
 	return throughPaths;
 }
