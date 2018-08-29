@@ -25,18 +25,29 @@ std::pair<std::vector<std::vector<NodePos>>, std::unordered_map<NodePos, NodePos
 		result.emplace_back();
 		nodeToUnitigMapping[fw] = NodePos { result.size()-1, true };
 		nodeToUnitigMapping[fw.Reverse()] = NodePos { result.size()-1, false };
+		bool circular = false;
 		while (graph.edges.count(bw) == 1 && graph.edges.at(bw).size() == 1)
 		{
 			NodePos next = graph.edges.at(bw)[0];
 			assert(graph.edges.count(next.Reverse()) == 1);
 			if (graph.edges.at(next.Reverse()).size() != 1) break;
-			if (next.id == node.first) break;
+			if (next.id == node.first)
+			{
+				//circular unitig, don't need to do anything with it
+				circular = true;
+				break;
+			}
 			bw = next;
 			result.back().push_back(bw.Reverse());
 			assert(nodeToUnitigMapping.count(bw) == 0);
 			assert(nodeToUnitigMapping.count(bw.Reverse()) == 0);
 			nodeToUnitigMapping[bw] = NodePos { result.size()-1, false };
 			nodeToUnitigMapping[bw.Reverse()] = NodePos { result.size()-1, true };
+		}
+		if (circular)
+		{
+			result.pop_back();
+			continue;
 		}
 		std::reverse(result.back().begin(), result.back().end());
 		result.back().push_back(fw);
@@ -45,7 +56,6 @@ std::pair<std::vector<std::vector<NodePos>>, std::unordered_map<NodePos, NodePos
 			NodePos next = graph.edges.at(fw)[0];
 			assert(graph.edges.count(next.Reverse()) == 1);
 			if (graph.edges.at(next.Reverse()).size() != 1) break;
-			if (next.id == node.first) break;
 			fw = next;
 			result.back().push_back(fw);
 			assert(nodeToUnitigMapping.count(fw) == 0);
