@@ -82,7 +82,7 @@ std::unordered_map<std::pair<NodePos, NodePos>, std::pair<NodePos, bool>> getCon
 	return result;
 }
 
-std::vector<vg::Alignment> remapAlignments(const std::vector<vg::Alignment>& oldAlns, const std::unordered_set<int>& existingNodes, const std::unordered_map<std::pair<NodePos, NodePos>, std::pair<NodePos, bool>>& connectors)
+std::vector<vg::Alignment> remapAlignments(const std::vector<vg::Alignment>& oldAlns, int minOverlap, const std::unordered_set<int>& existingNodes, const std::unordered_map<std::pair<NodePos, NodePos>, std::pair<NodePos, bool>>& connectors)
 {
 	std::vector<vg::Alignment> result;
 	for (auto aln : oldAlns)
@@ -90,16 +90,13 @@ std::vector<vg::Alignment> remapAlignments(const std::vector<vg::Alignment>& old
 		std::vector<NodePos> solids;
 		for (int i = 0; i < aln.path().mapping_size(); i++)
 		{
+			if (i == 0 && aln.path().mapping(i).edit(0).from_length() < minOverlap) continue;
+			if (i == aln.path().mapping_size()-1 && aln.path().mapping(i).edit(0).from_length() < minOverlap) continue;
 			if (existingNodes.count(aln.path().mapping(i).position().node_id()) == 1)
 			{
 				solids.emplace_back(aln.path().mapping(i).position().node_id(), !aln.path().mapping(i).position().is_reverse());
 			}
 		}
-		// for (size_t i = 0; i < solids.size(); i++)
-		// {
-		// 	std::cout << solids[i].id << (solids[i].end ? "-" : "+") << " ";
-		// }
-		// std::cout << std::endl;
 		vg::Alignment oneResult;
 		for (size_t i = 1; i < solids.size(); i++)
 		{
@@ -162,13 +159,14 @@ int main(int argc, char** argv)
 {
 	std::string graphFile { argv[1] };
 	std::string inputAlns { argv[2] };
-	std::string outputAlns { argv[3] };
+	int minOverlap = std::stoi(argv[3]);
+	std::string outputAlns { argv[4] };
 
 	auto graph = GfaGraph::LoadFromFile(graphFile);
 	auto alns = CommonUtils::LoadVGAlignments(inputAlns);
 	auto existingNodes = getExistingNodes(graph, alns);
 	auto connectors = getConnectors(graph, existingNodes);
-	auto newAlns = remapAlignments(alns, existingNodes, connectors);
+	auto newAlns = remapAlignments(alns, minOverlap, existingNodes, connectors);
 	auto connectorAlns = connectorsToAlns(connectors);
 
 	std::vector<vg::Alignment> result { newAlns.begin(), newAlns.end() };

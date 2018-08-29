@@ -7,151 +7,295 @@
 #include "vg.pb.h"
 #include "CommonUtils.h"
 
-std::unordered_set<int> getSolvableNodes(const GfaGraph& graph)
+std::pair<std::vector<std::vector<NodePos>>, std::unordered_map<NodePos, NodePos>> getUnitigs(const GfaGraph& graph)
 {
-	std::unordered_set<int> result;
+	std::vector<std::vector<NodePos>> result;
+	std::unordered_map<NodePos, NodePos> nodeToUnitigMapping;
 	for (auto node : graph.nodes)
 	{
-		NodePos pos;
-		pos.id = node.first;
-		pos.end = true;
-		if (graph.edges.count(pos) == 0) continue;
-		if (graph.edges.at(pos).size() <= 1) continue;
-		pos.end = false;
-		if (graph.edges.count(pos) == 0) continue;
-		if (graph.edges.at(pos).size() <= 1) continue;
-		result.insert(node.first);
+		NodePos fw, bw;
+		fw.id = node.first;
+		fw.end = true;
+		bw = fw.Reverse();
+		if (nodeToUnitigMapping.count(fw) == 1)
+		{
+			assert(nodeToUnitigMapping.count(bw) == 1);
+			continue;
+		}
+		result.emplace_back();
+		nodeToUnitigMapping[fw] = NodePos { result.size()-1, true };
+		nodeToUnitigMapping[fw.Reverse()] = NodePos { result.size()-1, false };
+		while (graph.edges.count(bw) == 1 && graph.edges.at(bw).size() == 1)
+		{
+			NodePos next = graph.edges.at(bw)[0];
+			assert(graph.edges.count(next.Reverse()) == 1);
+			if (graph.edges.at(next.Reverse()).size() != 1) break;
+			if (next.id == node.first) break;
+			bw = next;
+			result.back().push_back(bw.Reverse());
+			assert(nodeToUnitigMapping.count(bw) == 0);
+			assert(nodeToUnitigMapping.count(bw.Reverse()) == 0);
+			nodeToUnitigMapping[bw] = NodePos { result.size()-1, false };
+			nodeToUnitigMapping[bw.Reverse()] = NodePos { result.size()-1, true };
+		}
+		std::reverse(result.back().begin(), result.back().end());
+		result.back().push_back(fw);
+		while (graph.edges.count(fw) == 1 && graph.edges.at(fw).size() == 1)
+		{
+			NodePos next = graph.edges.at(fw)[0];
+			assert(graph.edges.count(next.Reverse()) == 1);
+			if (graph.edges.at(next.Reverse()).size() != 1) break;
+			if (next.id == node.first) break;
+			fw = next;
+			result.back().push_back(fw);
+			assert(nodeToUnitigMapping.count(fw) == 0);
+			assert(nodeToUnitigMapping.count(fw.Reverse()) == 0);
+			nodeToUnitigMapping[fw] = NodePos { result.size()-1, true };
+			nodeToUnitigMapping[fw.Reverse()] = NodePos { result.size()-1, false };
+		}
 	}
-	return result;
+	return std::make_pair(result, nodeToUnitigMapping);
 }
 
-std::vector<std::tuple<NodePos, NodePos, NodePos>> getTriplets(const std::unordered_set<int>& solvableNodes, const std::vector<vg::Alignment>& alns)
+std::vector<std::vector<NodePos>> getAlnUnitigPaths(const std::vector<vg::Alignment>& alns, const std::unordered_map<NodePos, NodePos>& nodeToUnitigMapping)
 {
-	std::vector<std::tuple<NodePos, NodePos, NodePos>> result;
+	std::vector<std::vector<NodePos>> result;
 	for (auto aln : alns)
 	{
-		for (int i = 1; i < aln.path().mapping_size()-1; i++)
+		result.emplace_back();
+		NodePos lastUnitig = nodeToUnitigMapping.at(NodePos { aln.path().mapping(0).position().node_id(), !aln.path().mapping(0).position().is_reverse() });
+		for (int i = 1; i < aln.path().mapping_size(); i++)
 		{
-			if (solvableNodes.count(aln.path().mapping(i).position().node_id()) == 1)
+			NodePos thisUnitig = nodeToUnitigMapping.at(NodePos { aln.path().mapping(i).position().node_id(), !aln.path().mapping(i).position().is_reverse() });
+			if (thisUnitig != lastUnitig)
 			{
-				result.emplace_back();
-				std::get<0>(result.back()).id = aln.path().mapping(i-1).position().node_id();
-				std::get<0>(result.back()).end = !aln.path().mapping(i-1).position().is_reverse();
-				std::get<1>(result.back()).id = aln.path().mapping(i).position().node_id();
-				std::get<1>(result.back()).end = !aln.path().mapping(i).position().is_reverse();
-				std::get<2>(result.back()).id = aln.path().mapping(i+1).position().node_id();
-				std::get<2>(result.back()).end = !aln.path().mapping(i+1).position().is_reverse();
+				result.back().push_back(lastUnitig);
+			}
+			lastUnitig = thisUnitig;
+		}
+		result.back().push_back(lastUnitig);
+	}
+	return result;
+}
+
+std::unordered_set<int> getRepeatUnitigs(const GfaGraph& graph, size_t safeNonrepeatLength, const std::vector<std::vector<NodePos>>& unitigs, const std::unordered_map<NodePos, NodePos>& nodeToUnitigMapping)
+{
+	std::unordered_set<int> result;
+	for (size_t i = 0; i < unitigs.size(); i++)
+	{
+		size_t unitigLength = 0;
+		for (auto node : unitigs[i])
+		{
+			unitigLength += graph.nodes.at(node.id).size() - graph.edgeOverlap;
+		}
+		if (unitigLength >= safeNonrepeatLength) continue;
+		NodePos leftEnd = unitigs[i][0].Reverse();
+		if (graph.edges.count(leftEnd) == 1 && graph.edges.at(leftEnd).size() > 1)
+		{
+			result.insert(i);
+			continue;
+		}
+		NodePos rightEnd = unitigs[i].back();
+		if (graph.edges.count(rightEnd) == 1 && graph.edges.at(rightEnd).size() > 1)
+		{
+			result.insert(i);
+			continue;
+		}
+	}
+	return result;
+}
+
+std::vector<std::vector<NodePos>> getRepeatCrossingPaths(const std::unordered_set<int>& repeatUnitigs, const std::vector<std::vector<NodePos>>& paths)
+{
+	std::vector<std::vector<NodePos>> result;
+	for (auto path : paths)
+	{
+		size_t lastNonrepetitive = 0;
+		bool currentlyRepeat = repeatUnitigs.count(path[0].id) == 1;
+		for (size_t i = 1; i < path.size(); i++)
+		{
+			if (repeatUnitigs.count(path[i].id) == 0)
+			{
+				if (currentlyRepeat)
+				{
+					result.emplace_back(path.begin() + lastNonrepetitive, path.begin() + i + 1);
+					currentlyRepeat = false;
+				}
+				lastNonrepetitive = i;
+				currentlyRepeat = false;
+			}
+			else
+			{
+				currentlyRepeat = true;
 			}
 		}
 	}
 	return result;
 }
 
-std::vector<std::tuple<NodePos, NodePos, NodePos>> getUniqueTriplets(const std::vector<std::tuple<NodePos, NodePos, NodePos>>& triplets)
+std::vector<std::vector<NodePos>> getRepeatPassthroughPaths(const std::unordered_set<int>& repeatUnitigs, const std::vector<std::vector<NodePos>>& paths)
 {
-	std::set<std::tuple<NodePos, NodePos, NodePos>> uniques { triplets.begin(), triplets.end() };
-	std::vector<std::tuple<NodePos, NodePos, NodePos>> result { uniques.begin(), uniques.end() };
-	return result;
-}
-
-std::vector<std::tuple<NodePos, std::unordered_set<NodePos>, std::unordered_set<NodePos>>> resolveTriplets(const std::vector<std::tuple<NodePos, NodePos, NodePos>>& triplets)
-{
-	std::vector<std::tuple<NodePos, std::unordered_set<NodePos>, std::unordered_set<NodePos>>> result;
-	std::unordered_map<NodePos, std::vector<std::pair<NodePos, NodePos>>> tripletsPerNode;
-	for (auto tr : triplets)
+	std::vector<std::vector<NodePos>> result;
+	for (auto path : paths)
 	{
-		tripletsPerNode[std::get<1>(tr)].emplace_back(std::get<0>(tr), std::get<2>(tr));
-	}
-	for (auto node : tripletsPerNode)
-	{
-		std::unordered_map<NodePos, size_t> component;
-		for (auto pair : node.second)
+		assert(path.size() >= 1);
+		assert(path.size() >= 2 || repeatUnitigs.count(path[0].id) == 1);
+		assert(path.size() >= 3 || (repeatUnitigs.count(path[0].id) == 1 || repeatUnitigs.count(path[1].id) == 1));
+#ifndef NDEBUG
+		for (size_t i = 1; i < path.size()-1; i++)
 		{
-			size_t componentNum = component.size();
-			component[pair.first] = componentNum;
-			componentNum = component.size();
-			component[pair.second] = componentNum;
+			assert(repeatUnitigs.count(path[i].id) == 1);
 		}
-		bool repeat = true;
-		while (repeat)
-		{
-			repeat = false;
-			for (auto pair : node.second)
-			{
-				if (component[pair.first] != component[pair.second])
-				{
-					size_t replaceThis = component[pair.second];
-					size_t replaceWith = component[pair.first]; 
-					for (auto& p : component)
-					{
-						if (p.second == replaceThis) p.second = replaceWith;
-					}
-					repeat = true;
-				}
-			}
-		}
-		size_t numComponents = 0;
-		std::unordered_map<size_t, size_t> componentMap;
-		for (auto pair : component)
-		{
-			if (componentMap.count(pair.second) == 0)
-			{
-				componentMap[pair.second] = numComponents;
-				numComponents++;
-			}
-		}
-		assert(numComponents != -1);
-		std::vector<std::tuple<NodePos, std::unordered_set<NodePos>, std::unordered_set<NodePos>>> partialResult;
-		partialResult.resize(numComponents);
-		for (auto pair : componentMap)
-		{
-			assert(std::get<0>(partialResult[pair.second]).id == 0 || std::get<0>(partialResult[pair.second]) == node.first);
-			std::get<0>(partialResult[pair.second]) = node.first;
-			for (auto c : node.second)
-			{
-				if (componentMap[component[c.first]] == pair.second)
-				{
-					std::get<1>(partialResult[pair.second]).insert(c.first);
-				}
-				if (componentMap[component[c.second]] == pair.second)
-				{
-					std::get<2>(partialResult[pair.second]).insert(c.second);
-				}
-			}
-		}
-		for (size_t i = 0; i < numComponents; i++)
-		{
-			assert(std::get<0>(partialResult[i]).id != 0);
-		}
-		result.insert(result.end(), partialResult.begin(), partialResult.end());
+#endif
+		if (repeatUnitigs.count(path[0].id) == 0 && repeatUnitigs.count(path.back().id) == 0) result.emplace_back(path);
 	}
 	return result;
 }
 
-std::vector<std::tuple<NodePos, NodePos, NodePos>> canonizeTriplets(const std::vector<std::tuple<NodePos, NodePos, NodePos>>& triplets)
+std::vector<std::vector<NodePos>> canonizePaths(const std::vector<std::vector<NodePos>>& paths)
 {
-	std::vector<std::tuple<NodePos, NodePos, NodePos>> result;
-	for (auto t : triplets)
+	std::vector<std::vector<NodePos>> result;
+	for (auto path : paths)
 	{
-		if (std::get<1>(t).end)
+		assert(path.size() >= 3);
+		result.push_back(path);
+		if (path.back() < path[0])
 		{
-			result.emplace_back(std::get<2>(t).Reverse(), std::get<1>(t).Reverse(), std::get<0>(t).Reverse());
+			std::reverse(result.back().begin(), result.back().end());
+			for (auto& node : result.back())
+			{
+				node = node.Reverse();
+			}
+		}
+	}
+	return result;
+}
+
+std::vector<std::vector<NodePos>> getUniquePaths(const std::vector<std::vector<NodePos>>& paths)
+{
+	std::set<std::vector<NodePos>> uniques { paths.begin(), paths.end() };
+	std::vector<std::vector<NodePos>> result { uniques.begin(), uniques.end() };
+	return result;
+}
+
+bool pathsAreCompatible(const std::vector<NodePos>& subpath, const std::vector<NodePos>& superpath)
+{
+	if (subpath.size() > superpath.size()) return false;
+	for (size_t start = 0; start < superpath.size() - subpath.size() + 1; start++)
+	{
+		bool compatible = true;
+		for (size_t i = 0; i < subpath.size(); i++)
+		{
+			if (subpath[i] != superpath[start+i])
+			{
+				compatible = false;
+				break;
+			}
+		}
+		if (compatible) return true;
+	}
+	for (size_t start = 0; start < superpath.size() - subpath.size() + 1; start++)
+	{
+		bool compatible = true;
+		for (size_t i = 0; i < subpath.size(); i++)
+		{
+			if (subpath[subpath.size() - 1 - i].Reverse() != superpath[start+i])
+			{
+				compatible = false;
+				break;
+			}
+		}
+		if (compatible) return true;
+	}
+	return false;
+}
+
+std::vector<std::vector<NodePos>> resolvePaths(const std::vector<std::vector<NodePos>>& throughPaths, const std::vector<std::vector<NodePos>>& paths)
+{
+	std::unordered_map<int, std::vector<size_t>> nodeCrossingThroughPaths;
+	for (size_t i = 0; i < throughPaths.size(); i++)
+	{
+		for (auto node : throughPaths[i])
+		{
+			nodeCrossingThroughPaths[node.id].push_back(i);
+		}
+	}
+	for (auto path : paths)
+	{
+		std::set<size_t> possibleCompatibles;
+		for (auto node : path)
+		{
+			possibleCompatibles.insert(nodeCrossingThroughPaths[node.id].begin(), nodeCrossingThroughPaths[node.id].end());
+		}
+		bool compatible = false;
+		for (auto possibleCompatible : possibleCompatibles)
+		{
+			if (pathsAreCompatible(path, throughPaths[possibleCompatible]))
+			{
+				compatible = true;
+				break;
+			}
+		}
+		if (compatible) continue;
+		// ??? not compatible, what do ???
+		assert(false);
+	}
+	return throughPaths;
+}
+
+std::vector<NodePos> getUnitigPathNodes(const std::vector<NodePos>& unitigPath, const std::vector<std::vector<NodePos>>& unitigs)
+{
+	assert(unitigPath.size() >= 3);
+	std::vector<NodePos> nodes;
+	if (!unitigPath[0].end)
+	{
+		nodes.push_back(unitigs[unitigPath[0].id].back());
+	}
+	else
+	{
+		nodes.push_back(unitigs[unitigPath[0].id][0].Reverse());
+	}
+	for (size_t i = 1; i < unitigPath.size()-1; i++)
+	{
+		auto u = unitigPath[i];
+		if (!u.end)
+		{
+			for (auto n : unitigs[u.id])
+			{
+				nodes.push_back(n);
+			}
 		}
 		else
 		{
-			result.push_back(t);
+			for (size_t i = unitigs[u.id].size()-1; i < unitigs[u.id].size(); i--)
+			{
+				nodes.push_back(unitigs[u.id][i].Reverse());
+			}
 		}
 	}
-	return result;
+	if (!unitigPath.back().end)
+	{
+		nodes.push_back(unitigs[unitigPath.back().id][0]);
+	}
+	else
+	{
+		nodes.push_back(unitigs[unitigPath.back().id].back().Reverse());
+	}
+	return nodes;
 }
 
-void writeGraph(const GfaGraph& graph, const std::vector<std::tuple<NodePos, std::unordered_set<NodePos>, std::unordered_set<NodePos>>>& resolved, std::string filename)
+void writeGraph(const GfaGraph& graph, const std::vector<std::vector<NodePos>>& unitigResolvedPaths, const std::vector<std::vector<NodePos>>& unitigs, std::string filename)
 {
 	std::ofstream file { filename };
 	std::unordered_set<int> resolvedNodes;
-	for (auto r : resolved)
+	for (auto p : unitigResolvedPaths)
 	{
-		resolvedNodes.insert(std::get<0>(r).id);
+		std::vector<NodePos> nodes = getUnitigPathNodes(p, unitigs);
+		assert(nodes.size() >= 3);
+		for (size_t i = 1; i < nodes.size()-1; i++)
+		{
+			resolvedNodes.insert(nodes[i].id);
+		}
 	}
 	int newId = 0;
 	for (auto node : graph.nodes)
@@ -171,19 +315,26 @@ void writeGraph(const GfaGraph& graph, const std::vector<std::tuple<NodePos, std
 		}
 	}
 	newId++;
-	for (auto r : resolved)
+	for (auto p : unitigResolvedPaths)
 	{
-		assert(graph.nodes.count(std::get<0>(r).id) == 1);
-		file << "S\t" << newId << "\t" << graph.nodes.at(std::get<0>(r).id) << std::endl;
-		for (auto inNeighbor : std::get<1>(r))
+		std::vector<NodePos> nodes = getUnitigPathNodes(p, unitigs);
+		assert(nodes.size() >= 3);
+		assert(resolvedNodes.count(nodes[0].id) == 0);
+		assert(resolvedNodes.count(nodes.back().id) == 0);
+		for (size_t i = 1; i < nodes.size() - 1; i++)
 		{
-			file << "L\t" << inNeighbor.id << "\t" << (inNeighbor.end ? "-" : "+") << "\t" << newId << "\t+\t" << graph.edgeOverlap << "M" << std::endl;
+			assert(resolvedNodes.count(nodes[i].id) == 1);
+			std::string seq = graph.nodes.at(nodes[i].id);
+			if (!nodes[i].end) seq = CommonUtils::ReverseComplement(seq);
+			file << "S\t" << newId + i - 1 << "\t" << seq << std::endl;
 		}
-		for (auto outNeighbor : std::get<2>(r))
+		file << "L\t" << nodes[0].id << "\t" << (nodes[0].end ? "+" : "-") << "\t" << newId << "\t+\t" << graph.edgeOverlap << "M" << std::endl; 
+		for (size_t i = 1; i < nodes.size() - 2; i++)
 		{
-			file << "L\t" << newId << "\t+\t" << outNeighbor.id << "\t" << (outNeighbor.end ? "-" : "+") << "\t" << graph.edgeOverlap << "M" << std::endl;
+			file << "L\t" << (newId + i - 1) << "\t+\t" << (newId + i) << "\t+\t" << graph.edgeOverlap << "M" << std::endl; 
 		}
-		newId++;
+		file << "L\t" << (newId + nodes.size() - 3) << "\t+\t" << nodes.back().id << "\t" << (nodes.back().end ? "+" : "-") << "\t" << graph.edgeOverlap << "M" << std::endl;
+		newId += nodes.size() - 2;
 	}
 }
 
@@ -191,15 +342,20 @@ int main(int argc, char** argv)
 {
 	std::string inputGraph { argv[1] };
 	std::string inputAlns { argv[2] };
-	std::string outputGraph { argv[3] };
+	int safeNonrepeatLength = std::stoi(argv[3]);
+	std::string outputGraph { argv[4] };
 
 	auto graph = GfaGraph::LoadFromFile(inputGraph);
 	graph.confirmDoublesidedEdges();
 	auto alns = CommonUtils::LoadVGAlignments(inputAlns);
-	auto solvableNodes = getSolvableNodes(graph);
-	auto triplets = getTriplets(solvableNodes, alns);
-	auto canons = canonizeTriplets(triplets);
-	auto uniques = getUniqueTriplets(canons);
-	auto resolved = resolveTriplets(uniques);
-	writeGraph(graph, resolved, outputGraph);
+	auto unitigs = getUnitigs(graph);
+	auto alnUnitigPaths = getAlnUnitigPaths(alns, unitigs.second);
+	auto repeatUnitigs = getRepeatUnitigs(graph, safeNonrepeatLength, unitigs.first, unitigs.second);
+	auto paths = getRepeatCrossingPaths(repeatUnitigs, alnUnitigPaths);
+	auto uniquePaths = getUniquePaths(paths);
+	auto throughPaths = getRepeatPassthroughPaths(repeatUnitigs, uniquePaths);
+	auto canonThroughs = canonizePaths(throughPaths);
+	auto uniqueThroughs = getUniquePaths(canonThroughs);
+	auto resolved = resolvePaths(uniqueThroughs, uniquePaths);
+	writeGraph(graph, resolved, unitigs.first, outputGraph);
 }

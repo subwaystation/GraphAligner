@@ -13,6 +13,7 @@ SCRIPTPATH = config["graphalignerfolder"] + "scripts"
 BCALMPATH = config["bcalmpath"]
 CONVERTTOGFAPATH = config["bcalm_converttoGFApath"]
 VGPATH = config["vgpath"]
+SAFE_NONREPEAT_SIZE = 100000
 
 wildcard_constraints:
 	graphname = "k\d+_a\d+_u\d+",
@@ -139,7 +140,7 @@ rule remap_alignments_to_londnodes:
 	output:
 		"tmp/aln_{graphname}_ls{longnodesize}_o{overlapsize}.gam"
 	shell:
-		"{ALIGNERBINPATH}/RemapToLongnodegraph {input.graph} {input.alns} {output}"
+		"{ALIGNERBINPATH}/RemapToLongnodegraph {input.graph} {input.alns} {wildcards.overlapsize} {output}"
 
 rule simple_repeat_resolution:
 	input:
@@ -148,7 +149,7 @@ rule simple_repeat_resolution:
 	output:
 		"tmp/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_repeatresolved.gfa"
 	shell:
-		"{ALIGNERBINPATH}/ResolveSimpleRepeats {input.graph} {input.alns} {output}"
+		"{ALIGNERBINPATH}/ResolveSimpleRepeats {input.graph} {input.alns} {SAFE_NONREPEAT_SIZE} {output}"
 
 rule assembly_stats:
 	input:
