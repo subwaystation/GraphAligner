@@ -25,6 +25,18 @@ std::vector<std::vector<int>> LoadSnarlTraversalsFromFile(std::string filename)
 	return result;
 }
 
+std::vector<std::vector<int>> getCoreTraversals(const std::vector<std::vector<int>>& allnodeTraversals)
+{
+	std::vector<std::vector<int>> result;
+	for (auto traversal : allnodeTraversals)
+	{
+		result.emplace_back();
+		result.back().push_back(traversal[0]);
+		result.back().push_back(traversal.back());
+	}
+	return result;
+}
+
 int find(std::unordered_map<int, int>& parent, int node)
 {
 	assert(parent.count(node) == 1);
@@ -84,13 +96,11 @@ std::vector<int> findLongChains(const GfaGraph& graph, const std::vector<std::ve
 		auto parentnode = find(parent, node);
 		size[parentnode] += graph.nodes.at(node).size() - graph.edgeOverlap;
 	}
-	std::cout << "node,component" << std::endl;
 	std::vector<int> result;
 	for (auto pair : parent)
 	{
 		auto node = pair.first;
 		auto parentnode = find(parent, node);
-		std::cout << node << "," << parentnode << std::endl;
 		if (size[parentnode] >= minChainLength)
 		{
 			result.push_back(node);
@@ -113,10 +123,14 @@ int main(int argc, char** argv)
 	std::string graphfile { argv[1] };
 	std::string snarltraversalfile { argv[2] };
 	int minChainLength = std::stoi(argv[3]);
-	std::string outfile { argv[4] };
+	std::string allnodesOutfile { argv[4] };
+	std::string onlyCoreOutfile { argv[5] };
 
 	auto graph = GfaGraph::LoadFromFile(graphfile);
-	auto traversals = LoadSnarlTraversalsFromFile(snarltraversalfile);
-	auto result = findLongChains(graph, traversals, minChainLength);
-	writeResults(result, outfile);
+	auto allnodeTraversals = LoadSnarlTraversalsFromFile(snarltraversalfile);
+	auto coreTraversals = getCoreTraversals(allnodeTraversals);
+	auto allnodesResult = findLongChains(graph, allnodeTraversals, minChainLength);
+	auto onlyCoreResult = findLongChains(graph, coreTraversals, minChainLength);
+	writeResults(allnodesResult, allnodesOutfile);
+	writeResults(onlyCoreResult, onlyCoreOutfile);
 }
