@@ -4,9 +4,8 @@ import sys
 
 infile = sys.argv[1]
 freqcutoff = int(sys.argv[2])
-outfile = sys.argv[3]
-
-lencutoff = 110
+lencutoff = int(sys.argv[3])
+outfile = sys.argv[4]
 
 printing = False
 

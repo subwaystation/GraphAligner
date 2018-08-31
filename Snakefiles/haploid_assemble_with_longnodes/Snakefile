@@ -13,7 +13,8 @@ SCRIPTPATH = config["graphalignerfolder"] + "scripts"
 BCALMPATH = config["bcalmpath"]
 CONVERTTOGFAPATH = config["bcalm_converttoGFApath"]
 VGPATH = config["vgpath"]
-SAFE_NONREPEAT_SIZE = 100000
+SAFE_NONREPEAT_SIZE = config["safe_nonrepeat_size"]
+UNITIG_COVERAGEFILTER_LEN_CUTOFF = config["unitig_coveragefilter_len_cutoff"]
 
 wildcard_constraints:
 	graphname = "k\d+_a\d+_u\d+",
@@ -61,7 +62,7 @@ rule filter_unitig_coverage:
 	output:
 		temp("tmp/filelist_k{k}_a{a}_u{u}.unitigs.fa")
 	shell:
-		"python {SCRIPTPATH}/filter_bcalm_by_frequency.py {input} {wildcards.u} {output}"
+		"python {SCRIPTPATH}/filter_bcalm_by_frequency.py {input} {wildcards.u} {UNITIG_COVERAGEFILTER_LEN_CUTOFF} {output}"
 
 rule convert_graph:
 	input:

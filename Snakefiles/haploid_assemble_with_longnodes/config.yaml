@@ -44,6 +44,9 @@ kmer_abundance: 2
 # Minimum unitig abundance of the graph
 # This should be very low
 unitig_abundance: 5
+# Maximum length of a unitig which can be filtered by abundance
+# This should be a bit longer than the maximum short read length
+unitig_coveragefilter_len_cutoff: 120
 # Minimum size of a node considered to be a long node.
 # This is the most important parameter for assembly and determines how fragmented and resolved the assembly will be.
 # If the assembly is fragmented, lower this
@@ -52,6 +55,8 @@ longnodesize: 500
 # Minimum size of an alignment's last node's alignment to be considered valid.
 # This has usually very little effect. Values between 100 and 1000 usually work.
 alignmentoverlapsize: 500
+# For repeat resolution, all unitigs longer than this are considered non-repetitive
+safe_nonrepeat_size: 100000
 # Size of the seed hits.
 # Try values between 10 - 50 depending on read length and graph size
 seedsize: 51
