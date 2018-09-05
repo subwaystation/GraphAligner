@@ -23,6 +23,7 @@ size_t bpInSelected = 0;
 size_t bpInFull = 0;
 size_t seedCount = 0;
 size_t readsWithSeedCount = 0;
+size_t bpInReadsWithSeeds = 0;
 
 std::unordered_map<std::string, size_t> getReadLengths(std::string readFile)
 {
@@ -167,16 +168,20 @@ void writeAlignments(std::string filename, moodycamel::ConcurrentQueue<vg::Align
 	}
 }
 
-void countSeeds(std::string filename)
+void countSeeds(std::string filename, const std::unordered_map<std::string, size_t>& readLengths)
 {
 	std::unordered_set<std::string> readsWithSeed;
 	std::ifstream alnFile { filename, std::ios::in | std::ios::binary };
-	std::function<void(vg::Alignment&)> lambda = [&readsWithSeed, &seedCount](vg::Alignment& g) {
+	std::function<void(vg::Alignment&)> lambda = [&readsWithSeed, &seedCount, &readLengths](vg::Alignment& g) {
 		seedCount++;
 		readsWithSeed.insert(g.name());
 	};
 	stream::for_each(alnFile, lambda);
 	readsWithSeedCount = readsWithSeed.size();
+	for (auto r : readsWithSeed)
+	{
+		bpInReadsWithSeeds += readLengths.at(r);
+	}
 }
 
 int main(int argc, char** argv)
@@ -209,7 +214,7 @@ int main(int argc, char** argv)
 	std::thread allWriter {[&splitToAll, &outputAllAlnFile](){writeAlignments(outputAllAlnFile, splitToAll);}};
 	std::thread selectedWriter {[&splitToSelected, &outputSelectedAlnFile](){writeAlignments(outputSelectedAlnFile, splitToSelected);}};
 	std::thread fullLengthWriter {[&splitToFullLength, &outputFullLengthAlnFile](){writeAlignments(outputFullLengthAlnFile, splitToFullLength);}};
-	std::thread seedCounter {[&seedFile](){countSeeds(seedFile);}};
+	std::thread seedCounter {[&seedFile, &readLengths](){countSeeds(seedFile, readLengths);}};
 
 	seedCounter.join();
 	readThread.join();
@@ -238,6 +243,7 @@ int main(int argc, char** argv)
 	summary << fullLengthAlnCount << "\tnumber of full length alignments" << std::endl;
 	summary << readsWithAnAlnCount << "\treads with an alignment" << std::endl;
 	summary << bpInReads << "\tbp in reads" << std::endl;
+	summary << bpInReadsWithSeeds << "\tbp with a seed" << std::endl;
 	summary << bpInSelected << "\tbp in selected alignments" << std::endl;
 	summary << bpInFull << "\tbp in full length alignments" << std::endl;
 }
