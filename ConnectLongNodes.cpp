@@ -5,6 +5,16 @@
 #include "GfaGraph.h"
 #include "CommonUtils.h"
 
+struct ConnectingSet
+{
+	NodePos left;
+	NodePos right;
+	std::string consensus;
+	size_t primaryCoverage;
+	size_t secondaryCoverage;
+	size_t tertiaryCoverage;
+};
+
 std::unordered_set<int> getLongNodes(std::string filename)
 {
 	std::unordered_set<int> result;
@@ -179,7 +189,7 @@ std::vector<std::tuple<NodePos, NodePos, bool, std::string>> getSecondaryConnect
 			{
 				if ((j == 0 || j == pair.second[i].path().mapping_size()-1) && pair.second[i].path().mapping(j).edit(0).from_length() < minLen) continue;
 				if (longNodes.count(pair.second[i].path().mapping(j).position().node_id()) != 1) continue;
-				if (pair.second[i].path().mapping(j).position().offset() > 64) continue;
+				if (pair.second[i].path().mapping(j).position().offset() > 128) continue;
 				alnFirstValid[i].first.id = pair.second[i].path().mapping(j).position().node_id();
 				alnFirstValid[i].first.end = pair.second[i].path().mapping(j).position().is_reverse();
 				alnFirstValid[i].second = pair.second[i].query_position();
@@ -189,7 +199,7 @@ std::vector<std::tuple<NodePos, NodePos, bool, std::string>> getSecondaryConnect
 			{
 				if ((j == 0 || j == pair.second[i].path().mapping_size()-1) && pair.second[i].path().mapping(j).edit(0).from_length() < minLen) continue;
 				if (longNodes.count(pair.second[i].path().mapping(j).position().node_id()) != 1) continue;
-				if (pair.second[i].path().mapping(j).position().offset() + pair.second[i].path().mapping(j).edit(0).from_length() < graph.nodes.at(pair.second[i].path().mapping(j).position().node_id()).size()-64) continue;
+				if (pair.second[i].path().mapping(j).position().offset() + pair.second[i].path().mapping(j).edit(0).from_length() < graph.nodes.at(pair.second[i].path().mapping(j).position().node_id()).size()-128) continue;
 				alnLastValid[i].first.id = pair.second[i].path().mapping(j).position().node_id();
 				alnLastValid[i].first.end = pair.second[i].path().mapping(j).position().is_reverse();
 				alnLastValid[i].second = pair.second[i].query_position() + pair.second[i].sequence().size();
@@ -203,7 +213,7 @@ std::vector<std::tuple<NodePos, NodePos, bool, std::string>> getSecondaryConnect
 			{
 				if (alnLastValid[j].first.id == -1) continue;
 				if (alnLastValid[j].first.id == alnFirstValid[i].first.id) continue;
-				if (alnLastValid[j].second >= alnFirstValid[i].second) continue;
+				// if (alnLastValid[j].second >= alnFirstValid[i].second) continue;
 				std::string seq;
 				seq = graph.nodes.at(alnLastValid[j].first.id);
 				if (alnLastValid[j].first.end) seq = CommonUtils::ReverseComplement(seq);
@@ -215,6 +225,41 @@ std::vector<std::tuple<NodePos, NodePos, bool, std::string>> getSecondaryConnect
 				seq += otherNodeSeq.substr(0, graph.edgeOverlap);
 				result.emplace_back(alnLastValid[j].first, alnFirstValid[i].first, false, seq);
 				break;
+			}
+		}
+	}
+	return result;
+}
+
+std::vector<std::tuple<NodePos, NodePos, bool, std::string>> getTertiaryConnectors(const std::vector<vg::Alignment>& alns, const std::vector<FastQ>& reads, const std::unordered_set<int>& longNodes, size_t minLen, const GfaGraph& graph)
+{
+	std::unordered_map<std::string, std::vector<vg::Alignment>> alnsPerRead;
+	for (auto aln : alns)
+	{
+		alnsPerRead[aln.name()].push_back(aln);
+	}
+	std::vector<std::tuple<NodePos, NodePos, bool, std::string>> result;
+	for (auto pair : alnsPerRead)
+	{
+		std::vector<std::pair<size_t, NodePos>> nodeAlns;
+		for (auto aln : pair.second)
+		{
+			for (int i = 0; i < aln.path().mapping_size(); i++)
+			{
+				if (longNodes.count(aln.path().mapping(i).position().node_id()) == 0) continue;
+				if ((i == 0 || i == aln.path().mapping_size() - 1) && aln.path().mapping(i).edit(0).from_length() < minLen) continue;
+				NodePos pos;
+				pos.id = aln.path().mapping(i).position().node_id();
+				pos.end = aln.path().mapping(i).position().is_reverse();
+				nodeAlns.emplace_back(aln.query_position() + i, pos);
+			}
+		}
+		std::sort(nodeAlns.begin(), nodeAlns.end(), [](const std::pair<size_t, NodePos>& left, const std::pair<size_t, NodePos>& right) { return left.first < right.first; });
+		for (size_t i = 0; i < nodeAlns.size(); i++)
+		{
+			for (size_t j = 0; j < i; j++)
+			{
+				result.emplace_back(nodeAlns[j].second, nodeAlns[i].second, true, "");
 			}
 		}
 	}
@@ -236,11 +281,11 @@ std::vector<std::tuple<NodePos, NodePos, bool, std::string>> pickHighCoverageBub
 	return result;
 }
 
-std::vector<std::tuple<NodePos, NodePos, bool, std::string>> pickPrimaryAndSecondaryConnectors(const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& primaries, const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& secondaries)
+std::vector<std::tuple<NodePos, NodePos, bool, std::string>> addTipConnectors(const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& existing, const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& additional)
 {
 	std::unordered_set<int> hasPrimaryRightEdge;
 	std::unordered_set<int> hasPrimaryLeftEdge;
-	for (auto connector : primaries)
+	for (auto connector : existing)
 	{
 		if (std::get<0>(connector).end)
 		{
@@ -259,10 +304,11 @@ std::vector<std::tuple<NodePos, NodePos, bool, std::string>> pickPrimaryAndSecon
 			hasPrimaryRightEdge.insert(std::get<1>(connector).id);
 		}
 	}
-	std::vector<std::tuple<NodePos, NodePos, bool, std::string>> result = primaries;
+	std::vector<std::tuple<NodePos, NodePos, bool, std::string>> result = existing;
 	size_t added = 0;
-	for (auto connector : secondaries)
+	for (auto connector : additional)
 	{
+		if (std::get<0>(connector).id == std::get<1>(connector).id) continue;
 		if (std::get<0>(connector).end)
 		{
 			if (hasPrimaryRightEdge.count(std::get<0>(connector).id) == 1) continue;
@@ -286,6 +332,96 @@ std::vector<std::tuple<NodePos, NodePos, bool, std::string>> pickPrimaryAndSecon
 	return result;
 }
 
+std::vector<std::tuple<NodePos, NodePos, bool, std::string>> pickPrimaryAndSecondaryConnectors(const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& primaries, const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& secondaries)
+{
+	std::unordered_set<std::pair<NodePos, NodePos>> hasPrimary;
+	for (auto connector : primaries)
+	{
+		hasPrimary.emplace(std::get<0>(connector), std::get<1>(connector));
+	}
+	std::vector<std::tuple<NodePos, NodePos, bool, std::string>> result { primaries };
+	for (auto connector : secondaries)
+	{
+		if (hasPrimary.count(std::make_pair(std::get<0>(connector), std::get<1>(connector))) == 1) continue;
+		result.push_back(connector);
+	}
+	return result;
+}
+
+std::vector<std::tuple<NodePos, NodePos, bool, std::string>> pickConnectors(const std::vector<ConnectingSet>& connectorSet, size_t primaryCoverage, size_t secondaryCoverage, size_t tertiaryCoverage)
+{
+	std::vector<std::tuple<NodePos, NodePos, bool, std::string>> result;
+	for (auto connector : connectorSet)
+	{
+		if (connector.primaryCoverage < primaryCoverage) continue;
+		if (connector.secondaryCoverage < secondaryCoverage) continue;
+		if (connector.tertiaryCoverage < tertiaryCoverage) continue;
+		if (connector.consensus == "")
+		{
+			result.emplace_back(connector.left, connector.right, true, "");
+		}
+		else
+		{
+			result.emplace_back(connector.left, connector.right, false, connector.consensus);
+		}
+	}
+	std::cerr << "pick " << primaryCoverage << " " << secondaryCoverage << " " << tertiaryCoverage << " resulted in " << result.size() << std::endl;
+	return result;
+}
+
+std::vector<ConnectingSet> buildConnectorSet(const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& primaries, const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& secondaries, const std::vector<std::tuple<NodePos, NodePos, bool, std::string>>& tertiaries)
+{
+	std::unordered_map<std::pair<NodePos, NodePos>, ConnectingSet> result;
+	for (auto connector : primaries)
+	{
+		auto found = result.find(std::make_pair(std::get<0>(connector), std::get<1>(connector)));
+		if (found == result.end())
+		{
+			result[std::make_pair(std::get<0>(connector), std::get<1>(connector))];
+			found = result.find(std::make_pair(std::get<0>(connector), std::get<1>(connector)));
+			assert(found != result.end());
+			found->second.left = std::get<0>(connector);
+			found->second.right = std::get<1>(connector);
+			found->second.consensus = std::get<3>(connector);
+		}
+		found->second.primaryCoverage++;
+	}
+	for (auto connector : secondaries)
+	{
+		auto found = result.find(std::make_pair(std::get<0>(connector), std::get<1>(connector)));
+		if (found == result.end())
+		{
+			result[std::make_pair(std::get<0>(connector), std::get<1>(connector))];
+			found = result.find(std::make_pair(std::get<0>(connector), std::get<1>(connector)));
+			assert(found != result.end());
+			found->second.left = std::get<0>(connector);
+			found->second.right = std::get<1>(connector);
+			found->second.consensus = std::get<3>(connector);
+		}
+		found->second.secondaryCoverage++;
+	}
+	for (auto connector : tertiaries)
+	{
+		auto found = result.find(std::make_pair(std::get<0>(connector), std::get<1>(connector)));
+		if (found == result.end())
+		{
+			result[std::make_pair(std::get<0>(connector), std::get<1>(connector))];
+			found = result.find(std::make_pair(std::get<0>(connector), std::get<1>(connector)));
+			assert(found != result.end());
+			found->second.left = std::get<0>(connector);
+			found->second.right = std::get<1>(connector);
+			found->second.consensus = std::get<3>(connector);
+		}
+		found->second.tertiaryCoverage++;
+	}
+	std::vector<ConnectingSet> resultvec;
+	for (auto pair : result)
+	{
+		resultvec.push_back(pair.second);
+	}
+	return resultvec;
+}
+
 int main(int argc, char** argv)
 {
 	std::string alnfile { argv[1] };
@@ -304,23 +440,35 @@ int main(int argc, char** argv)
 	auto canon = canonizePaths(connectors);
 	auto secondaries = getSecondaryConnectors(alns, reads, longNodes, minLongnodeAlnlen, graph);
 	auto canonSecondaries = canonizePaths(secondaries);
-	auto hicovConnectors_3 = pickHighCoverageBubbles(canon, 5);
-	auto hicovConnectors_2 = pickHighCoverageBubbles(canon, 2);
-	auto uniques = pickUniquePaths(canon);
-	auto arbitraryOne = pickOneArbitraryConnectorPerBubble(canon);
-	auto arbitraryHicov_3 = pickOneArbitraryConnectorPerBubble(hicovConnectors_3);
-	auto arbitraryHicov_2 = pickOneArbitraryConnectorPerBubble(hicovConnectors_2);
-	std::cerr << "start with " << arbitraryHicov_3.size() << std::endl;
-	auto merged = pickPrimaryAndSecondaryConnectors(arbitraryHicov_3, hicovConnectors_2);
-	merged = pickPrimaryAndSecondaryConnectors(merged, arbitraryOne);
-	auto hicovSecondaries_3 = pickHighCoverageBubbles(canonSecondaries, 5);
-	auto hicovSecondaries_2 = pickHighCoverageBubbles(canonSecondaries, 2);
-	auto arbitrarySecond = pickOneArbitraryConnectorPerBubble(canonSecondaries);
-	auto arbitrarySecondHicov_3 = pickOneArbitraryConnectorPerBubble(hicovSecondaries_3);
-	auto arbitrarySecondHicov_2 = pickOneArbitraryConnectorPerBubble(hicovSecondaries_2);
-	merged = pickPrimaryAndSecondaryConnectors(merged, arbitrarySecondHicov_3);
-	merged = pickPrimaryAndSecondaryConnectors(merged, arbitrarySecondHicov_2);
-	merged = pickPrimaryAndSecondaryConnectors(merged, arbitrarySecond);
+	auto tertiaries = getTertiaryConnectors(alns, reads, longNodes, minLongnodeAlnlen, graph);
+	auto canonTertiaries = canonizePaths(tertiaries);
+	auto connectorSet = buildConnectorSet(canon, canonSecondaries, canonTertiaries);
+	std::cerr << "connector set size " << connectorSet.size() << std::endl;
+	auto merged = pickConnectors(connectorSet, 5, 0, 0);
+	merged = addTipConnectors(merged, pickConnectors(connectorSet, 1, 0, 0));
+	merged = addTipConnectors(merged, pickConnectors(connectorSet, 0, 5, 0));
+	merged = addTipConnectors(merged, pickConnectors(connectorSet, 0, 2, 0));
+	merged = addTipConnectors(merged, pickConnectors(connectorSet, 0, 1, 0));
+	merged = addTipConnectors(merged, pickConnectors(connectorSet, 0, 0, 5));
+	merged = addTipConnectors(merged, pickConnectors(connectorSet, 0, 0, 2));
+	merged = addTipConnectors(merged, pickConnectors(connectorSet, 0, 0, 1));
+	// auto hicovConnectors_3 = pickHighCoverageBubbles(canon, 5);
+	// auto hicovConnectors_2 = pickHighCoverageBubbles(canon, 2);
+	// auto uniques = pickUniquePaths(canon);
+	// auto arbitraryOne = pickOneArbitraryConnectorPerBubble(canon);
+	// auto arbitraryHicov_3 = pickOneArbitraryConnectorPerBubble(hicovConnectors_3);
+	// auto arbitraryHicov_2 = pickOneArbitraryConnectorPerBubble(hicovConnectors_2);
+	// std::cerr << "start with " << arbitraryHicov_3.size() << std::endl;
+	// auto hicovSecondaries_3 = pickHighCoverageBubbles(canonSecondaries, 5);
+	// auto hicovSecondaries_2 = pickHighCoverageBubbles(canonSecondaries, 2);
+	// auto arbitrarySecond = pickOneArbitraryConnectorPerBubble(canonSecondaries);
+	// auto arbitrarySecondHicov_3 = pickOneArbitraryConnectorPerBubble(hicovSecondaries_3);
+	// auto arbitrarySecondHicov_2 = pickOneArbitraryConnectorPerBubble(hicovSecondaries_2);
+	// auto merged = pickPrimaryAndSecondaryConnectors(arbitraryHicov_3, arbitrarySecondHicov_3);
+	// merged = addTipConnectors(merged, arbitraryHicov_2);
+	// merged = addTipConnectors(merged, arbitraryOne);
+	// merged = addTipConnectors(merged, arbitrarySecondHicov_2);
+	// merged = addTipConnectors(merged, arbitrarySecond);
 
 	makeGraphAndWrite(merged, longNodes, graph, outputGraphFile);
 	// makeGraphAndWrite(arbitraryOne, longNodes, graph, outputGraphFile);
