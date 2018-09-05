@@ -93,7 +93,7 @@ GfaGraph GfaGraph::GetSubgraph(const std::unordered_set<int>& nodeids, const std
 			for (auto target : edges.at(end))
 			{
 				if (nodeids.count(target.id) == 0) continue;
-				if (selectedEdges.count({end, target}) == 1 || selectedEdges.count({target, end}) == 1) result.edges[end].push_back(target);
+				if (selectedEdges.count({end, target}) == 1 || selectedEdges.count({target.Reverse(), end.Reverse()}) == 1) result.edges[end].push_back(target);
 			}
 		}
 		NodePos start {node, false};
@@ -102,7 +102,7 @@ GfaGraph GfaGraph::GetSubgraph(const std::unordered_set<int>& nodeids, const std
 			for (auto target : edges.at(start))
 			{
 				if (nodeids.count(target.id) == 0) continue;
-				if (selectedEdges.count({start, target}) == 1 || selectedEdges.count({target, start}) == 1) result.edges[start].push_back(target);
+				if (selectedEdges.count({start, target}) == 1 || selectedEdges.count({target.Reverse(), start.Reverse()}) == 1) result.edges[start].push_back(target);
 			}
 		}
 	}
