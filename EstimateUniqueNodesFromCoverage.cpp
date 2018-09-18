@@ -36,19 +36,17 @@ std::vector<std::pair<int, std::vector<double>>> estimateRepeatCounts(const std:
 		size_t nodeSize = node.second.size() - graph.edgeOverlap;
 		double k = nodeCoverages.at(node.first);
 		double logConditional[10];
-		// assume repeat count 0 nodes have normally distributed coverages with mean 0 and deviation 0.1*avgcov
-		// arbitrary hack, increase the deviation with the sqrt of the node size instead of linearly, discourage long nodes from turning into repeat-0
-		double deviation = 0.1 * avgCoverage * sqrt(nodeSize);
-		double variance = deviation * deviation;
-		logConditional[0] = -log(sqrt(2 * 3.14 * variance)) - (k*k)/(2*variance*variance);
-		//extra penalty, assume only 10% of kmers are errors
-		logConditional[0] += nodeSize * log(0.1);
 
 		double kmin1sum = 0;
 		for (int i = 1; i < k; i++)
 		{
 			kmin1sum += log(i);
 		}
+
+		// assume repeat count 0 have a poisson distribution with mean 0.1 * avgcov
+		double lambda0 = nodeSize * avgCoverage * 0.1;
+		logConditional[0] = k * log(lambda0) - lambda0 - kmin1sum;
+
 		//arbitrarily assume max repeat count 10
 		for (int i = 1; i < 10; i++)
 		{
