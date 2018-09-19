@@ -108,6 +108,31 @@ std::vector<std::pair<int, int>> pickSafeCounts(const std::vector<std::pair<int,
 	return result;
 }
 
+std::vector<std::pair<int, int>> pickTotallySafeCounts(const std::vector<std::pair<int, std::vector<double>>>& estimatedProbabilities)
+{
+	std::vector<std::pair<int, int>> result;
+	for (auto pair : estimatedProbabilities)
+	{
+		int exactlyOne = 0;
+		int countNotZero = 0;
+		int countExactlyOne = 0;
+		for (size_t i = 0; i < pair.second.size(); i++)
+		{
+			if (pair.second[i] == 1)
+			{
+				exactlyOne = i;
+				countExactlyOne += 1;
+			}
+			if (pair.second[i] != 0)
+			{
+				countNotZero += 1;
+			}
+		}
+		if (countExactlyOne == 1 && countNotZero == 1) result.emplace_back(pair.first, exactlyOne);
+	}
+	return result;
+}
+
 int main(int argc, char** argv)
 {
 	std::string graphFile { argv[1] };
@@ -120,8 +145,11 @@ int main(int argc, char** argv)
 	double avgCoverage = (double)coverages.second / (double)estimatedGenomeSize;
 	std::cerr << "avg coverage " << avgCoverage << std::endl;
 	auto nodeRepeatCounts = estimateRepeatCounts(coverages.first, graph, avgCoverage);
-	auto safeRepeats = pickSafeCounts(nodeRepeatCounts, 0.999);
+	// auto safeRepeats = pickSafeCounts(nodeRepeatCounts, 0.999);
+	auto safeRepeats = pickTotallySafeCounts(nodeRepeatCounts);
 	std::cerr << safeRepeats.size() << " estimated known repeat counts" << std::endl;
+
+	std::cout << "node,count" << std::endl;
 	for (auto pair : safeRepeats)
 	{
 		std::cout << pair.first << "," << pair.second << std::endl;
