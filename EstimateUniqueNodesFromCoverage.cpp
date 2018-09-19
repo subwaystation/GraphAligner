@@ -3,6 +3,8 @@
 #include "GfaGraph.h"
 #include "CommonUtils.h"
 
+constexpr int MAX_REPEAT_COUNT = 30;
+
 std::pair<std::unordered_map<int, size_t>, size_t> getCoverages(const GfaGraph& graph, const std::vector<vg::Alignment>& alns)
 {
 	std::unordered_map<int, size_t> result;
@@ -27,7 +29,7 @@ std::vector<std::pair<int, std::vector<double>>> estimateRepeatCounts(const std:
 		{
 			std::vector<double> posteriors;
 			posteriors.push_back(1);
-			for (int i = 1; i < 10; i++)
+			for (int i = 1; i < MAX_REPEAT_COUNT; i++)
 			{
 				posteriors.push_back(0);
 			}
@@ -35,7 +37,7 @@ std::vector<std::pair<int, std::vector<double>>> estimateRepeatCounts(const std:
 		}
 		size_t nodeSize = node.second.size() - graph.edgeOverlap;
 		double k = nodeCoverages.at(node.first);
-		double logConditional[10];
+		double logConditional[MAX_REPEAT_COUNT];
 
 		double kmin1sum = 0;
 		for (int i = 1; i < k; i++)
@@ -47,34 +49,39 @@ std::vector<std::pair<int, std::vector<double>>> estimateRepeatCounts(const std:
 		double lambda0 = nodeSize * avgCoverage * 0.1;
 		logConditional[0] = k * log(lambda0) - lambda0 - kmin1sum;
 
-		//arbitrarily assume max repeat count 10
-		for (int i = 1; i < 10; i++)
+		for (int i = 1; i < MAX_REPEAT_COUNT; i++)
 		{
 			//assume repeat count > 0 nodes have a poisson distribution with mean repeatcount*avgcov
 			double lambda = nodeSize * avgCoverage * i;
 			logConditional[i] = k * log(lambda) - lambda - kmin1sum;
 		}
 		//arbitrarily assume ~exponentially decreasing repeat count, in reality almost certainly decreases faster
-		//arbitrarily 10% false positive kmer rate in the graph
-		double priors[10] { 0.10, 0.45, 0.20, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625, 0.001953125 };
-		double logOdds[10];
-		for (int i = 0; i < 10; i++)
+		//arbitrarily ~10% false positive kmer rate in the graph
+		double priors[MAX_REPEAT_COUNT];
+		priors[0] = 0.10;
+		priors[1] = 0.50;
+		for (int i = 2; i < MAX_REPEAT_COUNT; i++)
+		{
+			priors[i] = priors[i-1] * 0.5;
+		}
+		double logOdds[MAX_REPEAT_COUNT];
+		for (int i = 0; i < MAX_REPEAT_COUNT; i++)
 		{
 			logOdds[i] = log(priors[i]) + logConditional[i];
 		}
 		double maxLogOdd = logOdds[0];
-		for (int i = 0; i < 10; i++)
+		for (int i = 0; i < MAX_REPEAT_COUNT; i++)
 		{
 			maxLogOdd = std::max(maxLogOdd, logOdds[i]);
 		}
 		double oddsSum = 0;
-		for (int i = 0; i < 10; i++)
+		for (int i = 0; i < MAX_REPEAT_COUNT; i++)
 		{
 			oddsSum += exp(logOdds[i] - maxLogOdd);
 		}
 
 		std::vector<double> posteriors;
-		for (int i = 0; i < 10; i++)
+		for (int i = 0; i < MAX_REPEAT_COUNT; i++)
 		{
 			posteriors.push_back(exp(logOdds[i] - maxLogOdd) / oddsSum);
 		}
@@ -149,9 +156,9 @@ int main(int argc, char** argv)
 	auto safeRepeats = pickTotallySafeCounts(nodeRepeatCounts);
 	std::cerr << safeRepeats.size() << " estimated known repeat counts" << std::endl;
 
-	std::cout << "node,count" << std::endl;
+	std::cout << "node\tcount" << std::endl;
 	for (auto pair : safeRepeats)
 	{
-		std::cout << pair.first << "," << pair.second << std::endl;
+		std::cout << pair.first << "\t" << pair.second << std::endl;
 	}
 }
