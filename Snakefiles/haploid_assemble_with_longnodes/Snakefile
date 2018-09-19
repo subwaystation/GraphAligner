@@ -5,31 +5,27 @@ LONGREADS = config["longreads"]
 SHORTREADS = config["shortreads"]
 SEEDSIZE = config["seedsize"]
 MAXSEEDHITS = config["maxseeds"]
-LONGNODESIZE = config["longnodesize"]
-ALIGNMENTOVERLAPSIZE = config["alignmentoverlapsize"]
 ALIGNERPARAMS = config["aligner_params"]
 ALIGNERBINPATH = config["graphalignerfolder"] + "bin"
 SCRIPTPATH = config["graphalignerfolder"] + "scripts"
 BCALMPATH = config["bcalmpath"]
 CONVERTTOGFAPATH = config["bcalm_converttoGFApath"]
 VGPATH = config["vgpath"]
-SAFE_NONREPEAT_SIZE = config["safe_nonrepeat_size"]
 UNITIG_COVERAGEFILTER_LEN_CUTOFF = config["unitig_coveragefilter_len_cutoff"]
+GENOMESIZE = config["genome_size"]
 
 wildcard_constraints:
 	graphname = "k\d+_a\d+_u\d+",
 	k = "\d+",
 	a = "\d+",
 	u = "\d+",
-	longnodesize = "\d+",
-	overlapsize = "\d+",
 	longreads = "[^_]+",
 	shortreads = "[^_]+"
 
 rule all:
 	input:
-		expand("output/assemblystats_k{k}_a{a}_u{u}_ls{longnodesize}_o{overlapsize}.txt", k=config["k"], a=config["kmer_abundance"], u=config["unitig_abundance"], longnodesize=LONGNODESIZE, overlapsize=ALIGNMENTOVERLAPSIZE),
-		expand("output/assembly_k{k}_a{a}_u{u}_ls{longnodesize}_o{overlapsize}_unitig.gfa", k=config["k"], a=config["kmer_abundance"], u=config["unitig_abundance"], longnodesize=LONGNODESIZE, overlapsize=ALIGNMENTOVERLAPSIZE),
+		expand("output/assemblystats_k{k}_a{a}_u{u}.txt", k=config["k"], a=config["kmer_abundance"], u=config["unitig_abundance"]),
+		expand("output/assembly_k{k}_a{a}_u{u}_unitig.gfa", k=config["k"], a=config["kmer_abundance"], u=config["unitig_abundance"]),
 		expand("output/alignmentstats_k{k}_a{a}_u{u}.txt", k=config["k"], a=config["kmer_abundance"], u=config["unitig_abundance"], longreads=LONGREADS)
 
 rule merge_reads:
@@ -80,17 +76,9 @@ rule untip_graph:
 	shell:
 		"{ALIGNERBINPATH}/UntipRelative 1000 100 0.1 < {input} > {output}"
 
-rule extract_biggest_component:
-	input:
-		"tmp/graph_k{k}_a{a}_u{u}_untip.gfa"
-	output:
-		temp("tmp/graph_k{k}_a{a}_u{u}_component.gfa")
-	shell:
-		"python {SCRIPTPATH}/extract_gfa_biggest_component.py {input} > {output}"
-
 rule get_contigs:
 	input:
-		"tmp/graph_k{k}_a{a}_u{u}_component.gfa"
+		"tmp/graph_k{k}_a{a}_u{u}_untip.gfa"
 	output:
 		temp("contigs_k{k}_a{a}_u{u}.fa")
 	shell:
@@ -114,50 +102,41 @@ rule final_graph:
 	shell:
 		"{CONVERTTOGFAPATH} {input} {output} {wildcards.k}"
 
-rule get_long_nodes:
+rule estimate_node_repeat_counts:
 	input:
-		"tmp/graph_{graphname}.gfa"
+		graph = "tmp/graph_{graphname}.gfa",
+		alns = "tmp/aln_{graphname}_merged.gam"
 	output:
-		"tmp/longnodes_{graphname}_{longnodesize}.txt"
+		"tmp/counts_{graphname}.csv"
 	shell:
-		"grep S < {input} | awk '{{if (length($3) >= {wildcards.longnodesize}) print $2;}}' > {output}"
+		"{ALIGNERBINPATH}/EstimateUniqueNodesFromCoverage {input.graph} {input.alns} {GENOMESIZE} > {output}"
 
-rule assemble_longnodes:
+rule get_unique_nodes:
+	input:
+		"tmp/counts_{graphname}.csv"
+	output:
+		"tmp/uniques_{graphname}.txt"
+	shell:
+		"grep ',1\\b' < {input} | cut -d ',' -f 1 > {output}"
+
+rule assemble_uniquenodes:
 	input:
 		graph = "tmp/graph_{graphname}.gfa",
 		alns = "tmp/aln_{graphname}_merged.gam",
-		longnodes = "tmp/longnodes_{graphname}_{longnodesize}.txt",
+		uniquenodes = "tmp/uniques_{graphname}.txt",
 		reads = "tmp/longreads_merged.fasta"
 	output:
-		graph = "tmp/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_raw.gfa",
-		stats = "tmp/assemblystats_{graphname}_ls{longnodesize}_o{overlapsize}.txt"
+		graph = "tmp/assembly_{graphname}_raw.gfa",
+		stats = "tmp/assemblystats_{graphname}.txt"
 	shell:
-		"/usr/bin/time -v {ALIGNERBINPATH}/ConnectLongNodes {input.alns} {input.graph} {input.reads} {input.longnodes} {wildcards.overlapsize} {output.graph} 2> {output.stats}"
-
-rule remap_alignments_to_londnodes:
-	input:
-		graph = "tmp/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_raw.gfa",
-		alns = "tmp/aln_{graphname}_merged.gam"
-	output:
-		"tmp/aln_{graphname}_ls{longnodesize}_o{overlapsize}.gam"
-	shell:
-		"{ALIGNERBINPATH}/RemapToLongnodegraph {input.graph} {input.alns} {wildcards.overlapsize} {output}"
-
-rule simple_repeat_resolution:
-	input:
-		graph = "tmp/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_raw.gfa",
-		alns = "tmp/aln_{graphname}_ls{longnodesize}_o{overlapsize}.gam"
-	output:
-		"tmp/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_repeatresolved.gfa"
-	shell:
-		"{ALIGNERBINPATH}/ResolveSimpleRepeats {input.graph} {input.alns} {SAFE_NONREPEAT_SIZE} {output}"
+		"/usr/bin/time -v {ALIGNERBINPATH}/ConnectLongNodes {input.alns} {input.graph} {input.reads} {input.uniquenodes} 1 {output.graph} 2> {output.stats}"
 
 rule assembly_stats:
 	input:
-		stats = "tmp/assemblystats_{graphname}_ls{longnodesize}_o{overlapsize}.txt",
-		graph = "output/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_unitig.gfa"
+		stats = "tmp/assemblystats_{graphname}.txt",
+		graph = "output/assembly_{graphname}_unitig.gfa"
 	output:
-		"output/assemblystats_{graphname}_ls{longnodesize}_o{overlapsize}.txt"
+		"output/assemblystats_{graphname}.txt"
 	run:
 		shell("touch {output}")
 		shell("grep 'Command being timed:' {input.stats} >> {output}"),
@@ -179,9 +158,9 @@ rule assembly_stats:
 
 rule unitigify_assembly:
 	input:
-		"tmp/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_repeatresolved.gfa"
+		"tmp/assembly_{graphname}_raw.gfa"
 	output:
-		"output/assembly_{graphname}_ls{longnodesize}_o{overlapsize}_unitig.gfa"
+		"output/assembly_{graphname}_unitig.gfa"
 	shell:
 		"{VGPATH} view -Fv {input} | {VGPATH} mod -u - | {VGPATH} view - > {output}"
 

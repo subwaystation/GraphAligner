@@ -259,7 +259,14 @@ std::vector<std::tuple<NodePos, NodePos, bool, std::string>> getTertiaryConnecto
 		{
 			for (size_t j = 0; j < i; j++)
 			{
-				result.emplace_back(nodeAlns[j].second, nodeAlns[i].second, true, "");
+				std::string leftseq, rightseq;
+				leftseq = graph.nodes.at(nodeAlns[j].second.id);
+				if (nodeAlns[j].second.end) leftseq = CommonUtils::ReverseComplement(leftseq);
+				leftseq = leftseq.substr(leftseq.size() - graph.edgeOverlap);
+				rightseq = graph.nodes.at(nodeAlns[i].second.id);
+				if (nodeAlns[i].second.end) rightseq = CommonUtils::ReverseComplement(rightseq);
+				rightseq = rightseq.substr(0, graph.edgeOverlap);
+				result.emplace_back(nodeAlns[j].second, nodeAlns[i].second, false, leftseq + rightseq);
 			}
 		}
 	}
@@ -422,6 +429,26 @@ std::vector<ConnectingSet> buildConnectorSet(const std::vector<std::tuple<NodePo
 	return resultvec;
 }
 
+std::vector<std::tuple<NodePos, NodePos, bool, std::string>> greedyPickTips(std::vector<ConnectingSet> connectorSet)
+{
+	std::unordered_set<NodePos> hasEdge;
+	std::sort(connectorSet.begin(), connectorSet.end(), [](const ConnectingSet& left, const ConnectingSet& right) { return left.primaryCoverage > right.primaryCoverage || (left.primaryCoverage == right.primaryCoverage && left.secondaryCoverage > right.secondaryCoverage) || (left.primaryCoverage == right.primaryCoverage && left.secondaryCoverage == right.secondaryCoverage && left.tertiaryCoverage > right.tertiaryCoverage); });
+	std::vector<std::tuple<NodePos, NodePos, bool, std::string>> result;
+	for (auto connector : connectorSet)
+	{
+		if (connector.left.id == connector.right.id) continue;
+		if (hasEdge.count(connector.left) == 1) continue;
+		if (hasEdge.count(connector.right.Reverse()) == 1) continue;
+		hasEdge.insert(connector.left);
+		hasEdge.insert(connector.right.Reverse());
+		result.emplace_back(connector.left, connector.right, connector.consensus == "", connector.consensus);
+	}
+	std::cerr << "picked " << result.size() << " tips" << std::endl;
+
+	return result;
+}
+
+
 int main(int argc, char** argv)
 {
 	std::string alnfile { argv[1] };
@@ -444,32 +471,7 @@ int main(int argc, char** argv)
 	auto canonTertiaries = canonizePaths(tertiaries);
 	auto connectorSet = buildConnectorSet(canon, canonSecondaries, canonTertiaries);
 	std::cerr << "connector set size " << connectorSet.size() << std::endl;
-	auto merged = pickConnectors(connectorSet, 5, 0, 0);
-	merged = addTipConnectors(merged, pickConnectors(connectorSet, 1, 0, 0));
-	merged = addTipConnectors(merged, pickConnectors(connectorSet, 0, 5, 0));
-	merged = addTipConnectors(merged, pickConnectors(connectorSet, 0, 2, 0));
-	merged = addTipConnectors(merged, pickConnectors(connectorSet, 0, 1, 0));
-	merged = addTipConnectors(merged, pickConnectors(connectorSet, 0, 0, 5));
-	merged = addTipConnectors(merged, pickConnectors(connectorSet, 0, 0, 2));
-	merged = addTipConnectors(merged, pickConnectors(connectorSet, 0, 0, 1));
-	// auto hicovConnectors_3 = pickHighCoverageBubbles(canon, 5);
-	// auto hicovConnectors_2 = pickHighCoverageBubbles(canon, 2);
-	// auto uniques = pickUniquePaths(canon);
-	// auto arbitraryOne = pickOneArbitraryConnectorPerBubble(canon);
-	// auto arbitraryHicov_3 = pickOneArbitraryConnectorPerBubble(hicovConnectors_3);
-	// auto arbitraryHicov_2 = pickOneArbitraryConnectorPerBubble(hicovConnectors_2);
-	// std::cerr << "start with " << arbitraryHicov_3.size() << std::endl;
-	// auto hicovSecondaries_3 = pickHighCoverageBubbles(canonSecondaries, 5);
-	// auto hicovSecondaries_2 = pickHighCoverageBubbles(canonSecondaries, 2);
-	// auto arbitrarySecond = pickOneArbitraryConnectorPerBubble(canonSecondaries);
-	// auto arbitrarySecondHicov_3 = pickOneArbitraryConnectorPerBubble(hicovSecondaries_3);
-	// auto arbitrarySecondHicov_2 = pickOneArbitraryConnectorPerBubble(hicovSecondaries_2);
-	// auto merged = pickPrimaryAndSecondaryConnectors(arbitraryHicov_3, arbitrarySecondHicov_3);
-	// merged = addTipConnectors(merged, arbitraryHicov_2);
-	// merged = addTipConnectors(merged, arbitraryOne);
-	// merged = addTipConnectors(merged, arbitrarySecondHicov_2);
-	// merged = addTipConnectors(merged, arbitrarySecond);
-
+	auto merged = greedyPickTips(connectorSet);
+	
 	makeGraphAndWrite(merged, longNodes, graph, outputGraphFile);
-	// makeGraphAndWrite(arbitraryOne, longNodes, graph, outputGraphFile);
 }
