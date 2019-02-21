@@ -2,7 +2,8 @@
 #include "AlignmentGraph.h"
 #include "BigraphToDigraph.h"
 
-size_t graphSize = 0;
+size_t graphNodeSize = 0;
+size_t graphEdgeSize = 0;
 bool originalGraphDeterministic;
 
 struct Automaton
@@ -170,7 +171,12 @@ Automaton toNxM(const AlignmentGraph& graph, size_t numColumns)
 	std::string seq;
 	std::vector<std::vector<size_t>> outNeighbors;
 	std::tie(seq, outNeighbors) = simplerGraph(graph);
-	graphSize = seq.size();
+	graphNodeSize = seq.size();
+	graphEdgeSize = 0;
+	for (auto list : outNeighbors)
+	{
+		graphEdgeSize += list.size();
+	}
 	originalGraphDeterministic = true;
 	for (size_t i = 0; i < outNeighbors.size(); i++)
 	{
@@ -264,7 +270,6 @@ Automaton toNxMWithoutEquivalence(const AlignmentGraph& graph, size_t numColumns
 	std::string seq;
 	std::vector<std::vector<size_t>> outNeighbors;
 	std::tie(seq, outNeighbors) = simplerGraph(graph);
-	graphSize = seq.size();
 
 	auto pathLens = getPathReachables(outNeighbors, numColumns);
 
@@ -693,7 +698,8 @@ int main(int argc, char** argv)
 
 	auto alnGraph = DirectedGraph::BuildFromGFA(graph, false);
 	auto currentGraph = toNxM(alnGraph, numColumns);
-	std::cerr << "input graph size: " << graphSize << std::endl;
+	std::cerr << "input graph nodes: " << graphNodeSize << std::endl;
+	std::cerr << "input graph edges: " << graphEdgeSize << std::endl;
 	std::cerr << "input graph is deterministic: " << (originalGraphDeterministic ? "yes" : "no") << std::endl;
 	std::cerr << "grid size: " << currentGraph.transitions.size() << std::endl;
 	// auto noneqGrid = toNxMWithoutEquivalence(alnGraph, numColumns);
@@ -708,6 +714,6 @@ int main(int argc, char** argv)
 	// auto noneqDFA = powersetDFA(noneqGrid);
 	// std::cerr << "non-equivalent DFA size: " << noneqDFA.transitions.size() << std::endl;
 	// std::cerr << "non-equivalent DFA number of forward non-deterministic forks: " << nonDeterministicForks(noneqDFA) << std::endl;
-	std::cerr << "Final size " << DFA.transitions.size() << " vs " << (graphSize * numColumns) << " (" << ((double)DFA.transitions.size() / (double)(graphSize * numColumns)) << ")" << std::endl;
-	// std::cerr << "Final non-equivalent size " << noneqDFA.transitions.size() << " vs " << (graphSize * numColumns) << " (" << ((double)noneqDFA.transitions.size() / (double)(graphSize * numColumns)) << ")" << std::endl;
+	std::cerr << "Final size Q=" << DFA.transitions.size() << ", m|E|=" << (graphEdgeSize * numColumns) << ", Q/(m|E|)=" << ((double)DFA.transitions.size() / (double)(graphEdgeSize * numColumns)) << std::endl;
+	// std::cerr << "Final non-equivalent size " << noneqDFA.transitions.size() << " vs " << (graphEdgeSize * numColumns) << " (" << ((double)noneqDFA.transitions.size() / (double)(graphEdgeSize * numColumns)) << ")" << std::endl;
 }
