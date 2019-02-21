@@ -102,7 +102,7 @@ public:
 	std::string OriginalNodeName(int nodeId) const;
 	size_t ComponentSize() const;
 
-private:
+// private:
 	void findLinearizable();
 	void AddNode(int nodeId, int offset, const std::string& sequence, bool reverseNode);
 	void RenumberAmbiguousToEnd();
