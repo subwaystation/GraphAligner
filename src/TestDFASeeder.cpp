@@ -11,6 +11,21 @@ struct Automaton
 	std::vector<std::vector<std::pair<size_t, size_t>>> transitions;
 };
 
+struct Digraph
+{
+	std::string seq;
+	std::vector<std::vector<size_t>> outNeighbors;
+	size_t numEdges() const
+	{
+		size_t result = 0;
+		for (size_t i = 0; i < outNeighbors.size(); i++)
+		{
+			result += outNeighbors[i].size();
+		}
+		return result;
+	}
+};
+
 std::vector<size_t> getPathReachables(const std::vector<std::vector<size_t>>& outNeighbors, size_t maxPathLen)
 {
 	std::vector<std::tuple<size_t, int, size_t>> callStack;
@@ -137,59 +152,55 @@ void addIfUnique(std::vector<T>& c, T item)
 	c.push_back(item);
 }
 
-std::pair<std::string, std::vector<std::vector<size_t>>> simplerGraph(const AlignmentGraph& graph)
+Digraph simplerGraph(const AlignmentGraph& graph)
 {
-	std::string seq;
-	std::vector<std::vector<size_t>> outNeighbors;
+	Digraph result;
 	std::unordered_map<int, size_t> nodeStart;
 	std::unordered_map<int, size_t> nodeEnd;
 	for (size_t i = 0; i < graph.NodeSize(); i++)
 	{
-		nodeStart[i] = seq.size();
+		nodeStart[i] = result.seq.size();
 		for (size_t j = 0; j < graph.NodeLength(i); j++)
 		{
 			assert(graph.NodeSequences(i, j) == 'A' || graph.NodeSequences(i, j) == 'C' || graph.NodeSequences(i, j) == 'G' || graph.NodeSequences(i, j) == 'T');
-			seq.push_back(graph.NodeSequences(i, j));
-			outNeighbors.emplace_back();
-			if (j > 0) outNeighbors[outNeighbors.size()-2].push_back(outNeighbors.size()-1);
+			result.seq.push_back(graph.NodeSequences(i, j));
+			result.outNeighbors.emplace_back();
+			if (j > 0) result.outNeighbors[result.outNeighbors.size()-2].push_back(result.outNeighbors.size()-1);
 		}
-		nodeEnd[i] = seq.size()-1;
+		nodeEnd[i] = result.seq.size()-1;
 	}
-	assert(outNeighbors.size() == seq.size());
+	assert(result.outNeighbors.size() == result.seq.size());
 	for (size_t source = 0; source < graph.outNeighbors.size(); source++)
 	{
 		for (auto target : graph.outNeighbors[source])
 		{
-			outNeighbors[nodeEnd[source]].push_back(nodeStart[target]);
+			result.outNeighbors[nodeEnd[source]].push_back(nodeStart[target]);
 		}
 	}
-	return std::make_pair(seq, outNeighbors);
+	return result;
 }
 
-Automaton toNxM(const AlignmentGraph& graph, size_t numColumns)
+Automaton toNxM(const Digraph& graph, size_t numColumns)
 {
-	std::string seq;
-	std::vector<std::vector<size_t>> outNeighbors;
-	std::tie(seq, outNeighbors) = simplerGraph(graph);
-	graphNodeSize = seq.size();
+	graphNodeSize = graph.seq.size();
 	graphEdgeSize = 0;
-	for (auto list : outNeighbors)
+	for (auto list : graph.outNeighbors)
 	{
 		graphEdgeSize += list.size();
 	}
 	originalGraphDeterministic = true;
-	for (size_t i = 0; i < outNeighbors.size(); i++)
+	for (size_t i = 0; i < graph.outNeighbors.size(); i++)
 	{
-		for (size_t j = 0; j < outNeighbors[i].size(); j++)
+		for (size_t j = 0; j < graph.outNeighbors[i].size(); j++)
 		{
-			for (size_t k = j+1; k < outNeighbors[i].size(); k++)
+			for (size_t k = j+1; k < graph.outNeighbors[i].size(); k++)
 			{
-				if (seq[outNeighbors[i][j]] == seq[outNeighbors[i][k]]) originalGraphDeterministic = false;
+				if (graph.seq[graph.outNeighbors[i][j]] == graph.seq[graph.outNeighbors[i][k]]) originalGraphDeterministic = false;
 			}
 		}
 	}
 
-	auto pathLens = getPathReachables(outNeighbors, numColumns);
+	auto pathLens = getPathReachables(graph.outNeighbors, numColumns);
 
 	Automaton result;
 	result.transitions.emplace_back();
@@ -200,40 +211,40 @@ Automaton toNxM(const AlignmentGraph& graph, size_t numColumns)
 	result.transitions[3].emplace_back(2, 'e');
 	std::vector<size_t> currentEqClass;
 	std::vector<size_t> previousEqClass;
-	currentEqClass.resize(seq.size(), std::numeric_limits<size_t>::max());
-	previousEqClass.resize(seq.size(), std::numeric_limits<size_t>::max());
-	for (size_t i = 0; i < seq.size(); i++)
+	currentEqClass.resize(graph.seq.size(), 3);
+	previousEqClass.resize(graph.seq.size(), std::numeric_limits<size_t>::max());
+	for (size_t i = 0; i < graph.seq.size(); i++)
 	{
 		assert(pathLens[i] != std::numeric_limits<size_t>::max());
 		assert(pathLens[i] <= numColumns);
-		if (pathLens[i] < numColumns) continue;
+		// if (pathLens[i] < numColumns) continue;
 		previousEqClass[i] = 3;
 		if (numColumns == 1)
 		{
-			addIfUnique(result.transitions[1], std::make_pair(currentEqClass[i], (size_t)seq[i]));
+			addIfUnique(result.transitions[1], std::make_pair(currentEqClass[i], (size_t)graph.seq[i]));
 		}
 	}
 	for (size_t j = numColumns-1; j > 0; j--)
 	{
 		std::map<std::tuple<size_t, size_t, size_t, size_t>, size_t> eqClasses;
-		for (size_t i = 0; i < seq.size(); i++)
+		for (size_t i = 0; i < graph.seq.size(); i++)
 		{
-			if (pathLens[i] < j)
-			{
-				//not reachable
-				currentEqClass[i] = std::numeric_limits<size_t>::max();
-				continue;
-			}
+			// if (pathLens[i] < j)
+			// {
+			// 	//not reachable
+			// 	currentEqClass[i] = std::numeric_limits<size_t>::max();
+			// 	continue;
+			// }
 			size_t A = std::numeric_limits<size_t>::max();
 			size_t C = std::numeric_limits<size_t>::max();
 			size_t G = std::numeric_limits<size_t>::max();
 			size_t T = std::numeric_limits<size_t>::max();
-			for (auto neighbor : outNeighbors[i])
+			for (auto neighbor : graph.outNeighbors[i])
 			{
-				if (seq[neighbor] == 'A') A = previousEqClass[neighbor];
-				if (seq[neighbor] == 'C') C = previousEqClass[neighbor];
-				if (seq[neighbor] == 'G') G = previousEqClass[neighbor];
-				if (seq[neighbor] == 'T') T = previousEqClass[neighbor];
+				if (graph.seq[neighbor] == 'A') A = previousEqClass[neighbor];
+				if (graph.seq[neighbor] == 'C') C = previousEqClass[neighbor];
+				if (graph.seq[neighbor] == 'G') G = previousEqClass[neighbor];
+				if (graph.seq[neighbor] == 'T') T = previousEqClass[neighbor];
 			}
 			if (A == std::numeric_limits<size_t>::max() && C == A && G == A && T == A)
 			{
@@ -247,13 +258,13 @@ Automaton toNxM(const AlignmentGraph& graph, size_t numColumns)
 				currentEqClass[i] = eqClasses[eqClass];
 				if (j == 1)
 				{
-					addIfUnique(result.transitions[1], std::make_pair(currentEqClass[i], (size_t)seq[i]));
+					addIfUnique(result.transitions[1], std::make_pair(currentEqClass[i], (size_t)graph.seq[i]));
 				}
 				continue;
 			}
 			currentEqClass[i] = result.transitions.size();
 			eqClasses[eqClass] = result.transitions.size();
-			if (j == 1) result.transitions[1].emplace_back(result.transitions.size(), seq[i]);
+			if (j == 1) result.transitions[1].emplace_back(result.transitions.size(), graph.seq[i]);
 			result.transitions.emplace_back();
 			if (A != std::numeric_limits<size_t>::max()) result.transitions.back().emplace_back(A, 'A');
 			if (C != std::numeric_limits<size_t>::max()) result.transitions.back().emplace_back(C, 'C');
@@ -265,13 +276,9 @@ Automaton toNxM(const AlignmentGraph& graph, size_t numColumns)
 	return result;
 }
 
-Automaton toNxMWithoutEquivalence(const AlignmentGraph& graph, size_t numColumns)
+Automaton toNxMWithoutEquivalence(const Digraph& graph, size_t numColumns)
 {
-	std::string seq;
-	std::vector<std::vector<size_t>> outNeighbors;
-	std::tie(seq, outNeighbors) = simplerGraph(graph);
-
-	auto pathLens = getPathReachables(outNeighbors, numColumns);
+	auto pathLens = getPathReachables(graph.outNeighbors, numColumns);
 
 	Automaton result;
 	result.transitions.emplace_back();
@@ -282,28 +289,38 @@ Automaton toNxMWithoutEquivalence(const AlignmentGraph& graph, size_t numColumns
 	result.transitions[2].emplace_back(3, 'e');
 	std::vector<size_t> currentEqClass;
 	std::vector<size_t> previousEqClass;
-	currentEqClass.resize(seq.size(), std::numeric_limits<size_t>::max());
-	previousEqClass.resize(seq.size(), std::numeric_limits<size_t>::max());
+	currentEqClass.resize(graph.seq.size(), std::numeric_limits<size_t>::max());
+	previousEqClass.resize(graph.seq.size(), std::numeric_limits<size_t>::max());
 	for (size_t j = numColumns-1; j < numColumns; j--)
 	{
-		for (size_t i = 0; i < seq.size(); i++)
+		for (size_t i = 0; i < graph.seq.size(); i++)
 		{
 			currentEqClass[i] = result.transitions.size();
 			result.transitions.emplace_back();
-			if (j == 0) result.transitions[1].emplace_back(currentEqClass[i], seq[i]);
+			if (j == 0) result.transitions[1].emplace_back(currentEqClass[i], graph.seq[i]);
 			if (j == numColumns-1) result.transitions[currentEqClass[i]].emplace_back(2, i + 256);
 			if (j < numColumns-1)
 			{
-				for (auto neighbor : outNeighbors[i])
+				for (auto neighbor : graph.outNeighbors[i])
 				{
 					assert(previousEqClass[neighbor] != std::numeric_limits<size_t>::max());
-					result.transitions[currentEqClass[i]].emplace_back(previousEqClass[neighbor], seq[neighbor]);
+					result.transitions[currentEqClass[i]].emplace_back(previousEqClass[neighbor], graph.seq[neighbor]);
 				}
 			}
 		}
 		std::swap(currentEqClass, previousEqClass);
 	}
 	return result;
+}
+
+Automaton toNxM(const AlignmentGraph& graph, size_t numColumns)
+{
+	return toNxM(simplerGraph(graph), numColumns);
+}
+
+Automaton toNxMWithoutEquivalence(const AlignmentGraph& graph, size_t numColumns)
+{
+	return toNxMWithoutEquivalence(simplerGraph(graph), numColumns);
 }
 
 Automaton reverse(const Automaton& original)
@@ -691,11 +708,9 @@ Automaton powersetDFA(const Automaton& NFA)
 	return result;
 }
 
-int main(int argc, char** argv)
+void testOneGraph(std::string filename, int numColumns)
 {
-	auto graph = GfaGraph::LoadFromFile(argv[1], true);
-	int numColumns = std::stoi(argv[2]);
-
+	auto graph = GfaGraph::LoadFromFile(filename, true);
 	auto alnGraph = DirectedGraph::BuildFromGFA(graph, false);
 	auto currentGraph = toNxM(alnGraph, numColumns);
 	std::cerr << "input graph nodes: " << graphNodeSize << std::endl;
@@ -716,4 +731,166 @@ int main(int argc, char** argv)
 	// std::cerr << "non-equivalent DFA number of forward non-deterministic forks: " << nonDeterministicForks(noneqDFA) << std::endl;
 	std::cerr << "Final size Q=" << DFA.transitions.size() << ", m|E|=" << (graphEdgeSize * numColumns) << ", Q/(m|E|)=" << ((double)DFA.transitions.size() / (double)(graphEdgeSize * numColumns)) << std::endl;
 	// std::cerr << "Final non-equivalent size " << noneqDFA.transitions.size() << " vs " << (graphEdgeSize * numColumns) << " (" << ((double)noneqDFA.transitions.size() / (double)(graphEdgeSize * numColumns)) << ")" << std::endl;
+}
+
+template <typename F>
+void enumerateDeterministicGraphs(size_t V, F f)
+{
+	Digraph graph;
+	graph.seq.resize(V, 'A');
+	std::vector<size_t> nodesA, nodesC, nodesG, nodesT;
+	std::vector<size_t> neighborA, neighborC, neighborG, neighborT;
+	for (size_t i = 0; i < V; i++)
+	{
+		nodesA.push_back(i);
+	}
+	neighborA.resize(V, 0);
+	neighborC.resize(V, 0);
+	neighborG.resize(V, 0);
+	neighborT.resize(V, 0);
+	graph.outNeighbors.clear();
+	graph.outNeighbors.resize(V);
+	for (size_t i = 0; i < V; i++)
+	{
+		assert(neighborA[i] <= nodesA.size());
+		assert(neighborC[i] <= nodesC.size());
+		assert(neighborG[i] <= nodesG.size());
+		assert(neighborT[i] <= nodesT.size());
+		if (neighborA[i] != nodesA.size()) graph.outNeighbors[i].push_back(nodesA[neighborA[i]]);
+		if (neighborC[i] != nodesC.size()) graph.outNeighbors[i].push_back(nodesC[neighborC[i]]);
+		if (neighborG[i] != nodesG.size()) graph.outNeighbors[i].push_back(nodesG[neighborG[i]]);
+		if (neighborT[i] != nodesT.size()) graph.outNeighbors[i].push_back(nodesT[neighborT[i]]);
+	}
+	f(graph);
+	while (true)
+	{
+		bool nextChar = false;
+		for (size_t i = 0; i < V; i++)
+		{
+			bool cont = false;
+			neighborT[i]++;
+			if (neighborT[i] > nodesT.size())
+			{
+				neighborT[i] = 0;
+				neighborG[i]++;
+				if (neighborG[i] > nodesG.size())
+				{
+					neighborG[i] = 0;
+					neighborC[i]++;
+					if (neighborC[i] > nodesC.size())
+					{
+						neighborC[i] = 0;
+						neighborA[i]++;
+						if (neighborA[i] > nodesA.size())
+						{
+							neighborA[i] = 0;
+							cont = true;
+						}
+					}
+				}
+			}
+			if (cont && i == V-1) nextChar = true;
+			if (!cont) break;
+		}
+		if (nextChar)
+		{
+			nodesA.clear();
+			nodesC.clear();
+			nodesG.clear();
+			nodesT.clear();
+			bool finished = false;
+			for (size_t i = 0; i < V; i++)
+			{
+				if (graph.seq[i] == 'A')
+				{
+					graph.seq[i] = 'C';
+					break;
+				}
+				if (graph.seq[i] == 'C')
+				{
+					graph.seq[i] = 'G';
+					break;
+				}
+				if (graph.seq[i] == 'G')
+				{
+					graph.seq[i] = 'T';
+					break;
+				}
+				if (graph.seq[i] == 'T')
+				{
+					graph.seq[i] = 'A';
+					if (i == V-1) finished = true;
+				}
+			}
+			if (finished) break;
+			for (size_t i = 0; i < V; i++)
+			{
+				if (graph.seq[i] == 'A') nodesA.push_back(i);
+				if (graph.seq[i] == 'C') nodesC.push_back(i);
+				if (graph.seq[i] == 'G') nodesG.push_back(i);
+				if (graph.seq[i] == 'T') nodesT.push_back(i);
+			}
+			neighborA.resize(V, 0);
+			neighborC.resize(V, 0);
+			neighborG.resize(V, 0);
+			neighborT.resize(V, 0);
+		}
+		graph.outNeighbors.clear();
+		graph.outNeighbors.resize(V);
+		for (size_t i = 0; i < V; i++)
+		{
+			assert(neighborA[i] <= nodesA.size());
+			assert(neighborC[i] <= nodesC.size());
+			assert(neighborG[i] <= nodesG.size());
+			assert(neighborT[i] <= nodesT.size());
+			if (neighborA[i] != nodesA.size()) graph.outNeighbors[i].push_back(nodesA[neighborA[i]]);
+			if (neighborC[i] != nodesC.size()) graph.outNeighbors[i].push_back(nodesC[neighborC[i]]);
+			if (neighborG[i] != nodesG.size()) graph.outNeighbors[i].push_back(nodesG[neighborG[i]]);
+			if (neighborT[i] != nodesT.size()) graph.outNeighbors[i].push_back(nodesT[neighborT[i]]);
+		}
+		f(graph);
+	}
+}
+
+void testAllGraphs(size_t maxV, size_t maxColumns)
+{
+	double maxQdivME = 0;
+	Digraph maxGraph;
+	size_t maxLength = 0;
+	for (size_t i = 2; i <= maxV; i++)
+	{
+		enumerateDeterministicGraphs(i, [&maxQdivME, &maxGraph, &maxLength, maxColumns](const Digraph& graph){
+			size_t numEdges = graph.numEdges();
+			for (size_t i = 2; i <= maxColumns; i++)
+			{
+				auto reachable = reverse(filterReachable(reverse(filterReachable(toNxM(graph, i), 's')), 'e'));
+				if (reachable.transitions.size() == 0) return;
+				auto DFA = powersetDFA(reachable);
+				double fraction = DFA.transitions.size() / (maxColumns * numEdges + 3);
+				if (fraction > maxQdivME)
+				{
+					maxQdivME = fraction;
+					maxGraph = graph;
+					maxLength = i;
+				}
+			}
+		});
+	}
+	std::cerr << "max fraction " << maxQdivME << std::endl;
+	std::cerr << "with length " << maxLength << std::endl;
+	std::cerr << maxGraph.seq << std::endl;
+	for (size_t i = 0; i < maxGraph.outNeighbors.size(); i++)
+	{
+		for (auto node : maxGraph.outNeighbors[i])
+		{
+			std::cerr << node << " ";
+		}
+		std::cerr << std::endl;
+	}
+}
+
+int main(int argc, char** argv)
+{
+	// testOneGraph(argv[1], std::stoi(argv[2]));
+	testAllGraphs(std::stoi(argv[1]), std::stoi(argv[2]));
 }
