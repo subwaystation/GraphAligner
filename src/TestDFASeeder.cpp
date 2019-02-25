@@ -618,10 +618,14 @@ Automaton filterReachable(const Automaton& graph, char startchar)
 	return result;
 }
 
-size_t recurseEquivalencePowersets(const Automaton& NFA, Automaton& result, const std::set<size_t>& currentSet, std::map<std::tuple<size_t, size_t, size_t, size_t, size_t>, size_t>& equivalencePowersets, std::map<std::set<size_t>, size_t>& powersetCache)
+size_t recurseEquivalencePowersets(const Automaton& NFA, Automaton& result, const std::set<size_t>& currentSet, std::map<std::tuple<size_t, size_t, size_t, size_t, size_t>, size_t>& equivalencePowersets, std::map<std::set<size_t>, size_t>& powersetCache, std::vector<size_t>& maxTraversals, std::vector<size_t>& maxInsertions)
 {
 	assert(currentSet.size() > 0);
 	if (powersetCache.count(currentSet) == 1) return powersetCache[currentSet];
+	for (auto node : currentSet)
+	{
+		maxTraversals[node]++;
+	}
 	std::set<size_t> A, C, G, T, e;
 	for (auto index : currentSet)
 	{
@@ -634,9 +638,13 @@ size_t recurseEquivalencePowersets(const Automaton& NFA, Automaton& result, cons
 			if (transition.second == 'e') e.insert(transition.first);
 			if (transition.second >= 256)
 			{
-				assert(NFA.transitions[index].size() == 1);
 				size_t eqClassName = result.transitions.size();
+				powersetCache[currentSet] = eqClassName;
 				result.transitions.emplace_back();
+				for (auto node : currentSet)
+				{
+					maxInsertions[node]++;
+				}
 				return eqClassName;
 			}
 		}
@@ -644,27 +652,27 @@ size_t recurseEquivalencePowersets(const Automaton& NFA, Automaton& result, cons
 	size_t classA = std::numeric_limits<size_t>::max(), classC = std::numeric_limits<size_t>::max(), classG = std::numeric_limits<size_t>::max(), classT = std::numeric_limits<size_t>::max(), classe = std::numeric_limits<size_t>::max();
 	if (A.size() > 0)
 	{
-		classA = recurseEquivalencePowersets(NFA, result, A, equivalencePowersets, powersetCache);
+		classA = recurseEquivalencePowersets(NFA, result, A, equivalencePowersets, powersetCache, maxTraversals, maxInsertions);
 		// assert(classA != 0);
 	}
 	if (C.size() > 0)
 	{
-		classC = recurseEquivalencePowersets(NFA, result, C, equivalencePowersets, powersetCache);
+		classC = recurseEquivalencePowersets(NFA, result, C, equivalencePowersets, powersetCache, maxTraversals, maxInsertions);
 		// assert(classC != 0);
 	}
 	if (G.size() > 0)
 	{
-		classG = recurseEquivalencePowersets(NFA, result, G, equivalencePowersets, powersetCache);
+		classG = recurseEquivalencePowersets(NFA, result, G, equivalencePowersets, powersetCache, maxTraversals, maxInsertions);
 		// assert(classG != 0);
 	}
 	if (T.size() > 0)
 	{
-		classT = recurseEquivalencePowersets(NFA, result, T, equivalencePowersets, powersetCache);
+		classT = recurseEquivalencePowersets(NFA, result, T, equivalencePowersets, powersetCache, maxTraversals, maxInsertions);
 		// assert(classT != 0);
 	}
 	if (e.size() > 0)
 	{
-		classe = recurseEquivalencePowersets(NFA, result, e, equivalencePowersets, powersetCache);
+		classe = recurseEquivalencePowersets(NFA, result, e, equivalencePowersets, powersetCache, maxTraversals, maxInsertions);
 		// assert(classe == 0);
 	}
 	std::tuple<size_t, size_t, size_t, size_t, size_t> currentEqClass { classA, classC, classG, classT, classe };
@@ -673,6 +681,10 @@ size_t recurseEquivalencePowersets(const Automaton& NFA, Automaton& result, cons
 	{
 		powersetCache[currentSet] = equivalencePowersets[currentEqClass];
 		return equivalencePowersets[currentEqClass];
+	}
+	for (auto node : currentSet)
+	{
+		maxInsertions[node]++;
 	}
 	eqClassName = result.transitions.size();
 	result.transitions.emplace_back();
@@ -689,6 +701,10 @@ size_t recurseEquivalencePowersets(const Automaton& NFA, Automaton& result, cons
 Automaton powersetDFA(const Automaton& NFA)
 {
 	Automaton result;
+	std::vector<size_t> maxTraversals;
+	std::vector<size_t> maxInsertions;
+	maxTraversals.resize(NFA.transitions.size(), 0);
+	maxInsertions.resize(NFA.transitions.size(), 0);
 	std::map<std::tuple<size_t, size_t, size_t, size_t, size_t>, size_t> equivalencePowersets;
 	std::map<std::set<size_t>, size_t> powersetCache;
 	std::set<size_t> starts;
@@ -702,7 +718,19 @@ Automaton powersetDFA(const Automaton& NFA)
 			}
 		}
 	}
-	size_t start = recurseEquivalencePowersets(NFA, result, starts, equivalencePowersets, powersetCache);
+	size_t start = recurseEquivalencePowersets(NFA, result, starts, equivalencePowersets, powersetCache, maxTraversals, maxInsertions);
+	size_t maxTraversal = 0;
+	for (size_t i = 0; i < maxTraversals.size(); i++)
+	{
+		maxTraversal = std::max(maxTraversal, maxTraversals[i]);
+	}
+	std::cerr << "max traversal " << maxTraversal << std::endl;
+	size_t maxInsertion = 0;
+	for (size_t i = 0; i < maxInsertions.size(); i++)
+	{
+		maxInsertion = std::max(maxInsertion, maxInsertions[i]);
+	}
+	std::cerr << "max insertion " << maxInsertion << std::endl;
 	result.transitions.emplace_back();
 	result.transitions.back().emplace_back(start, 's');
 	return result;
