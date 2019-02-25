@@ -717,20 +717,21 @@ void testOneGraph(std::string filename, int numColumns)
 	std::cerr << "input graph edges: " << graphEdgeSize << std::endl;
 	std::cerr << "input graph is deterministic: " << (originalGraphDeterministic ? "yes" : "no") << std::endl;
 	std::cerr << "grid size: " << currentGraph.transitions.size() << std::endl;
-	// auto noneqGrid = toNxMWithoutEquivalence(alnGraph, numColumns);
-	// std::cerr << "non-equivalent grid size: " << noneqGrid.transitions.size() << std::endl;
+	auto noneqGrid = toNxMWithoutEquivalence(alnGraph, numColumns);
+	std::cerr << "non-equivalent grid size: " << noneqGrid.transitions.size() << std::endl;
 	currentGraph = reverse(filterReachable(reverse(filterReachable(currentGraph, 's')), 'e'));
 	std::cerr << "reachable size: " << currentGraph.transitions.size() << std::endl;
+	noneqGrid = reverse(filterReachable(reverse(filterReachable(noneqGrid, 's')), 'e'));
+	std::cerr << "non-equivalent reachable size: " << currentGraph.transitions.size() << std::endl;
 	auto DFA = powersetDFA(currentGraph);
 	std::cerr << "DFA size: " << DFA.transitions.size() << std::endl;
 	std::cerr << "DFA number of forward non-deterministic forks: " << nonDeterministicForks(DFA) << std::endl;
 	// auto minDFA = reduce(DFA);
 	// std::cerr << "minDFA size: " << minDFA.transitions.size() << std::endl;
-	// auto noneqDFA = powersetDFA(noneqGrid);
-	// std::cerr << "non-equivalent DFA size: " << noneqDFA.transitions.size() << std::endl;
-	// std::cerr << "non-equivalent DFA number of forward non-deterministic forks: " << nonDeterministicForks(noneqDFA) << std::endl;
-	std::cerr << "Final size Q=" << DFA.transitions.size() << ", m|E|=" << (graphEdgeSize * numColumns) << ", Q/(m|E|)=" << ((double)DFA.transitions.size() / (double)(graphEdgeSize * numColumns)) << std::endl;
-	// std::cerr << "Final non-equivalent size " << noneqDFA.transitions.size() << " vs " << (graphEdgeSize * numColumns) << " (" << ((double)noneqDFA.transitions.size() / (double)(graphEdgeSize * numColumns)) << ")" << std::endl;
+	auto noneqDFA = powersetDFA(noneqGrid);
+	std::cerr << "non-equivalent DFA size: " << noneqDFA.transitions.size() << std::endl;
+	std::cerr << "Final size Q=" << DFA.transitions.size() << ", m|E|+3=" << (graphEdgeSize * numColumns + 3) << ", Q/(m|E|+3)=" << ((double)DFA.transitions.size() / (double)(graphEdgeSize * numColumns + 3)) << std::endl;
+	std::cerr << "Final non-equivalent size Q=" << noneqDFA.transitions.size() << ", m|E|+3=" << (graphEdgeSize * numColumns + 3) << ", Q/(m|E|+3)=" << ((double)noneqDFA.transitions.size() / (double)(graphEdgeSize * numColumns + 3)) << std::endl;
 }
 
 template <typename F>
@@ -891,6 +892,6 @@ void testAllGraphs(size_t maxV, size_t maxColumns)
 
 int main(int argc, char** argv)
 {
-	// testOneGraph(argv[1], std::stoi(argv[2]));
-	testAllGraphs(std::stoi(argv[1]), std::stoi(argv[2]));
+	testOneGraph(argv[1], std::stoi(argv[2]));
+	// testAllGraphs(std::stoi(argv[1]), std::stoi(argv[2]));
 }
