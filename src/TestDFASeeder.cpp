@@ -771,7 +771,7 @@ Automaton powersetDFA(const Automaton& NFA)
 	return result;
 }
 
-size_t recurseEquivalencePowersetsDirectly(const Digraph& graph, Automaton& result, const std::set<size_t>& currentSet, std::vector<std::map<std::tuple<size_t, size_t, size_t, size_t, size_t>, size_t>>& equivalencePowersets, std::vector<std::map<std::set<size_t>, size_t>>& powersetCaches, size_t level)
+size_t recurseEquivalencePowersetsDirectly(const Digraph& graph, Automaton& result, const std::set<size_t>& currentSet, std::vector<std::map<std::tuple<size_t, size_t, size_t, size_t>, size_t>>& equivalencePowersets, std::vector<std::map<std::set<size_t>, size_t>>& powersetCaches, size_t level)
 {
 	if (powersetCaches[level].count(currentSet) == 1) return powersetCaches[level][currentSet];
 	if (level == 0)
@@ -781,7 +781,7 @@ size_t recurseEquivalencePowersetsDirectly(const Digraph& graph, Automaton& resu
 		result.transitions.emplace_back();
 		return eqClassName;
 	}
-	std::set<size_t> A, C, G, T, e;
+	std::set<size_t> A, C, G, T;
 	for (auto index : currentSet)
 	{
 		for (auto neighbor : graph.outNeighbors[index])
@@ -790,10 +790,9 @@ size_t recurseEquivalencePowersetsDirectly(const Digraph& graph, Automaton& resu
 			if (graph.seq[neighbor] == 'C') C.insert(neighbor);
 			if (graph.seq[neighbor] == 'G') G.insert(neighbor);
 			if (graph.seq[neighbor] == 'T') T.insert(neighbor);
-			if (graph.seq[neighbor] == 'e') e.insert(neighbor);
 		}
 	}
-	size_t classA = std::numeric_limits<size_t>::max(), classC = std::numeric_limits<size_t>::max(), classG = std::numeric_limits<size_t>::max(), classT = std::numeric_limits<size_t>::max(), classe = std::numeric_limits<size_t>::max();
+	size_t classA = std::numeric_limits<size_t>::max(), classC = std::numeric_limits<size_t>::max(), classG = std::numeric_limits<size_t>::max(), classT = std::numeric_limits<size_t>::max();
 	if (A.size() > 0)
 	{
 		classA = recurseEquivalencePowersetsDirectly(graph, result, A, equivalencePowersets, powersetCaches, level-1);
@@ -814,12 +813,7 @@ size_t recurseEquivalencePowersetsDirectly(const Digraph& graph, Automaton& resu
 		classT = recurseEquivalencePowersetsDirectly(graph, result, T, equivalencePowersets, powersetCaches, level-1);
 		// assert(classT != 0);
 	}
-	if (e.size() > 0)
-	{
-		classe = recurseEquivalencePowersetsDirectly(graph, result, e, equivalencePowersets, powersetCaches, level-1);
-		// assert(classe == 0);
-	}
-	std::tuple<size_t, size_t, size_t, size_t, size_t> currentEqClass { classA, classC, classG, classT, classe };
+	std::tuple<size_t, size_t, size_t, size_t> currentEqClass { classA, classC, classG, classT };
 	size_t eqClassName;
 	if (equivalencePowersets[level].count(currentEqClass) == 1)
 	{
@@ -834,14 +828,13 @@ size_t recurseEquivalencePowersetsDirectly(const Digraph& graph, Automaton& resu
 	if (C.size() > 0) result.transitions[eqClassName].emplace_back(classC, 'C');
 	if (G.size() > 0) result.transitions[eqClassName].emplace_back(classG, 'G');
 	if (T.size() > 0) result.transitions[eqClassName].emplace_back(classT, 'T');
-	if (e.size() > 0) result.transitions[eqClassName].emplace_back(classe, 'e');
 	return eqClassName;
 }
 
 Automaton powersetDirectly(const Digraph& graph, size_t numColumns)
 {
 	Automaton result;
-	std::vector<std::map<std::tuple<size_t, size_t, size_t, size_t, size_t>, size_t>> equivalencePowersets;
+	std::vector<std::map<std::tuple<size_t, size_t, size_t, size_t>, size_t>> equivalencePowersets;
 	std::vector<std::map<std::set<size_t>, size_t>> powersetCaches;
 	equivalencePowersets.resize(numColumns);
 	powersetCaches.resize(numColumns);
