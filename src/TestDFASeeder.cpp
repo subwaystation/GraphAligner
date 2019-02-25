@@ -771,6 +771,109 @@ Automaton powersetDFA(const Automaton& NFA)
 	return result;
 }
 
+size_t recurseEquivalencePowersetsDirectly(const Digraph& graph, Automaton& result, const std::set<size_t>& currentSet, std::vector<std::map<std::tuple<size_t, size_t, size_t, size_t, size_t>, size_t>>& equivalencePowersets, std::vector<std::map<std::set<size_t>, size_t>>& powersetCaches, size_t level)
+{
+	if (powersetCaches[level].count(currentSet) == 1) return powersetCaches[level][currentSet];
+	if (level == 0)
+	{
+		size_t eqClassName = result.transitions.size();
+		powersetCaches[level][currentSet] = eqClassName;
+		result.transitions.emplace_back();
+		return eqClassName;
+	}
+	std::set<size_t> A, C, G, T, e;
+	for (auto index : currentSet)
+	{
+		for (auto neighbor : graph.outNeighbors[index])
+		{
+			if (graph.seq[neighbor] == 'A') A.insert(neighbor);
+			if (graph.seq[neighbor] == 'C') C.insert(neighbor);
+			if (graph.seq[neighbor] == 'G') G.insert(neighbor);
+			if (graph.seq[neighbor] == 'T') T.insert(neighbor);
+			if (graph.seq[neighbor] == 'e') e.insert(neighbor);
+		}
+	}
+	size_t classA = std::numeric_limits<size_t>::max(), classC = std::numeric_limits<size_t>::max(), classG = std::numeric_limits<size_t>::max(), classT = std::numeric_limits<size_t>::max(), classe = std::numeric_limits<size_t>::max();
+	if (A.size() > 0)
+	{
+		classA = recurseEquivalencePowersetsDirectly(graph, result, A, equivalencePowersets, powersetCaches, level-1);
+		// assert(classA != 0);
+	}
+	if (C.size() > 0)
+	{
+		classC = recurseEquivalencePowersetsDirectly(graph, result, C, equivalencePowersets, powersetCaches, level-1);
+		// assert(classC != 0);
+	}
+	if (G.size() > 0)
+	{
+		classG = recurseEquivalencePowersetsDirectly(graph, result, G, equivalencePowersets, powersetCaches, level-1);
+		// assert(classG != 0);
+	}
+	if (T.size() > 0)
+	{
+		classT = recurseEquivalencePowersetsDirectly(graph, result, T, equivalencePowersets, powersetCaches, level-1);
+		// assert(classT != 0);
+	}
+	if (e.size() > 0)
+	{
+		classe = recurseEquivalencePowersetsDirectly(graph, result, e, equivalencePowersets, powersetCaches, level-1);
+		// assert(classe == 0);
+	}
+	std::tuple<size_t, size_t, size_t, size_t, size_t> currentEqClass { classA, classC, classG, classT, classe };
+	size_t eqClassName;
+	if (equivalencePowersets[level].count(currentEqClass) == 1)
+	{
+		powersetCaches[level][currentSet] = equivalencePowersets[level][currentEqClass];
+		return equivalencePowersets[level][currentEqClass];
+	}
+	eqClassName = result.transitions.size();
+	result.transitions.emplace_back();
+	equivalencePowersets[level][currentEqClass] = eqClassName;
+	powersetCaches[level][currentSet] = eqClassName;
+	if (A.size() > 0) result.transitions[eqClassName].emplace_back(classA, 'A');
+	if (C.size() > 0) result.transitions[eqClassName].emplace_back(classC, 'C');
+	if (G.size() > 0) result.transitions[eqClassName].emplace_back(classG, 'G');
+	if (T.size() > 0) result.transitions[eqClassName].emplace_back(classT, 'T');
+	if (e.size() > 0) result.transitions[eqClassName].emplace_back(classe, 'e');
+	return eqClassName;
+}
+
+Automaton powersetDirectly(const Digraph& graph, size_t numColumns)
+{
+	Automaton result;
+	std::vector<std::map<std::tuple<size_t, size_t, size_t, size_t, size_t>, size_t>> equivalencePowersets;
+	std::vector<std::map<std::set<size_t>, size_t>> powersetCaches;
+	equivalencePowersets.resize(numColumns);
+	powersetCaches.resize(numColumns);
+	std::set<size_t> startsA;
+	std::set<size_t> startsT;
+	std::set<size_t> startsC;
+	std::set<size_t> startsG;
+	for (size_t i = 0; i < graph.seq.size(); i++)
+	{
+		if (graph.seq[i] == 'A') startsA.insert(i);
+		if (graph.seq[i] == 'C') startsC.insert(i);
+		if (graph.seq[i] == 'G') startsG.insert(i);
+		if (graph.seq[i] == 'T') startsT.insert(i);
+	}
+	size_t startA = std::numeric_limits<size_t>::max();
+	size_t startC = std::numeric_limits<size_t>::max();
+	size_t startG = std::numeric_limits<size_t>::max();
+	size_t startT = std::numeric_limits<size_t>::max();
+	if (startsA.size() > 0) startA = recurseEquivalencePowersetsDirectly(graph, result, startsA, equivalencePowersets, powersetCaches, numColumns-1);
+	if (startsC.size() > 0) startC = recurseEquivalencePowersetsDirectly(graph, result, startsC, equivalencePowersets, powersetCaches, numColumns-1);
+	if (startsG.size() > 0) startG = recurseEquivalencePowersetsDirectly(graph, result, startsG, equivalencePowersets, powersetCaches, numColumns-1);
+	if (startsT.size() > 0) startT = recurseEquivalencePowersetsDirectly(graph, result, startsT, equivalencePowersets, powersetCaches, numColumns-1);
+	result.transitions.emplace_back();
+	if (startsA.size() > 0) result.transitions.back().emplace_back(startA, 'A');
+	if (startsC.size() > 0) result.transitions.back().emplace_back(startC, 'C');
+	if (startsG.size() > 0) result.transitions.back().emplace_back(startG, 'G');
+	if (startsT.size() > 0) result.transitions.back().emplace_back(startT, 'T');
+	result.transitions.emplace_back();
+	result.transitions.back().emplace_back(result.transitions.size()-2, 's');
+	return result;
+}
+
 void testOneGraph(std::string filename, int numColumns)
 {
 	auto graph = GfaGraph::LoadFromFile(filename, true);
@@ -793,8 +896,13 @@ void testOneGraph(std::string filename, int numColumns)
 	// std::cerr << "minDFA size: " << minDFA.transitions.size() << std::endl;
 	auto noneqDFA = powersetDFA(noneqGrid);
 	std::cerr << "non-equivalent DFA size: " << noneqDFA.transitions.size() << std::endl;
+	std::cerr << "non-equivalent number of forward non-deterministic forks: " << nonDeterministicForks(noneqDFA) << std::endl;
+	auto directConstruction = powersetDirectly(simplerGraph(alnGraph), numColumns);
+	std::cerr << "direct construction DFA size: " << directConstruction.transitions.size() << std::endl;
+	std::cerr << "direct construction number of forward non-deterministic forks: " << nonDeterministicForks(directConstruction) << std::endl;
 	std::cerr << "Final size Q=" << DFA.transitions.size() << ", m|E|+3=" << (graphEdgeSize * numColumns + 3) << ", Q/(m|E|+3)=" << ((double)DFA.transitions.size() / (double)(graphEdgeSize * numColumns + 3)) << std::endl;
 	std::cerr << "Final non-equivalent size Q=" << noneqDFA.transitions.size() << ", m|E|+3=" << (graphEdgeSize * numColumns + 3) << ", Q/(m|E|+3)=" << ((double)noneqDFA.transitions.size() / (double)(graphEdgeSize * numColumns + 3)) << std::endl;
+	std::cerr << "Direct construction size Q=" << directConstruction.transitions.size() << ", m|E|+3=" << (graphEdgeSize * numColumns + 3) << ", Q/(m|E|+3)=" << ((double)directConstruction.transitions.size() / (double)(graphEdgeSize * numColumns + 3)) << std::endl;
 }
 
 template <typename F>
