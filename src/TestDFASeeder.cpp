@@ -618,10 +618,16 @@ Automaton filterReachable(const Automaton& graph, char startchar)
 	return result;
 }
 
-size_t recurseEquivalencePowersets(const Automaton& NFA, Automaton& result, const std::set<size_t>& currentSet, std::map<std::tuple<size_t, size_t, size_t, size_t, size_t>, size_t>& equivalencePowersets, std::map<std::set<size_t>, size_t>& powersetCache, std::vector<size_t>& maxTraversals, std::vector<size_t>& maxInsertions)
+size_t recurseEquivalencePowersets(const Automaton& NFA, Automaton& result, const std::set<size_t>& currentSet, std::map<std::tuple<size_t, size_t, size_t, size_t, size_t>, size_t>& equivalencePowersets, std::map<std::set<size_t>, size_t>& powersetCache, size_t level, std::vector<size_t>& checksPerLevel, std::vector<size_t>& traversalsPerLevel, std::vector<size_t>& insertionsPerLevel, std::vector<size_t>& maxChecks, std::vector<size_t>& maxTraversals, std::vector<size_t>& maxInsertions, std::map<std::pair<size_t, size_t>, size_t>& maxEdgeTraversals)
 {
 	assert(currentSet.size() > 0);
+	checksPerLevel[level]++;
+	for (auto node : currentSet)
+	{
+		maxChecks[node]++;
+	}
 	if (powersetCache.count(currentSet) == 1) return powersetCache[currentSet];
+	traversalsPerLevel[level]++;
 	for (auto node : currentSet)
 	{
 		maxTraversals[node]++;
@@ -631,6 +637,7 @@ size_t recurseEquivalencePowersets(const Automaton& NFA, Automaton& result, cons
 	{
 		for (auto transition : NFA.transitions[index])
 		{
+			maxEdgeTraversals[std::make_pair(index, transition.first)]++;
 			if (transition.second == 'A') A.insert(transition.first);
 			if (transition.second == 'C') C.insert(transition.first);
 			if (transition.second == 'G') G.insert(transition.first);
@@ -641,6 +648,7 @@ size_t recurseEquivalencePowersets(const Automaton& NFA, Automaton& result, cons
 				size_t eqClassName = result.transitions.size();
 				powersetCache[currentSet] = eqClassName;
 				result.transitions.emplace_back();
+				insertionsPerLevel[level]++;
 				for (auto node : currentSet)
 				{
 					maxInsertions[node]++;
@@ -652,27 +660,27 @@ size_t recurseEquivalencePowersets(const Automaton& NFA, Automaton& result, cons
 	size_t classA = std::numeric_limits<size_t>::max(), classC = std::numeric_limits<size_t>::max(), classG = std::numeric_limits<size_t>::max(), classT = std::numeric_limits<size_t>::max(), classe = std::numeric_limits<size_t>::max();
 	if (A.size() > 0)
 	{
-		classA = recurseEquivalencePowersets(NFA, result, A, equivalencePowersets, powersetCache, maxTraversals, maxInsertions);
+		classA = recurseEquivalencePowersets(NFA, result, A, equivalencePowersets, powersetCache, level+1, checksPerLevel, traversalsPerLevel, insertionsPerLevel, maxChecks, maxTraversals, maxInsertions, maxEdgeTraversals);
 		// assert(classA != 0);
 	}
 	if (C.size() > 0)
 	{
-		classC = recurseEquivalencePowersets(NFA, result, C, equivalencePowersets, powersetCache, maxTraversals, maxInsertions);
+		classC = recurseEquivalencePowersets(NFA, result, C, equivalencePowersets, powersetCache, level+1, checksPerLevel, traversalsPerLevel, insertionsPerLevel, maxChecks, maxTraversals, maxInsertions, maxEdgeTraversals);
 		// assert(classC != 0);
 	}
 	if (G.size() > 0)
 	{
-		classG = recurseEquivalencePowersets(NFA, result, G, equivalencePowersets, powersetCache, maxTraversals, maxInsertions);
+		classG = recurseEquivalencePowersets(NFA, result, G, equivalencePowersets, powersetCache, level+1, checksPerLevel, traversalsPerLevel, insertionsPerLevel, maxChecks, maxTraversals, maxInsertions, maxEdgeTraversals);
 		// assert(classG != 0);
 	}
 	if (T.size() > 0)
 	{
-		classT = recurseEquivalencePowersets(NFA, result, T, equivalencePowersets, powersetCache, maxTraversals, maxInsertions);
+		classT = recurseEquivalencePowersets(NFA, result, T, equivalencePowersets, powersetCache, level+1, checksPerLevel, traversalsPerLevel, insertionsPerLevel, maxChecks, maxTraversals, maxInsertions, maxEdgeTraversals);
 		// assert(classT != 0);
 	}
 	if (e.size() > 0)
 	{
-		classe = recurseEquivalencePowersets(NFA, result, e, equivalencePowersets, powersetCache, maxTraversals, maxInsertions);
+		classe = recurseEquivalencePowersets(NFA, result, e, equivalencePowersets, powersetCache, level+1, checksPerLevel, traversalsPerLevel, insertionsPerLevel, maxChecks, maxTraversals, maxInsertions, maxEdgeTraversals);
 		// assert(classe == 0);
 	}
 	std::tuple<size_t, size_t, size_t, size_t, size_t> currentEqClass { classA, classC, classG, classT, classe };
@@ -682,6 +690,7 @@ size_t recurseEquivalencePowersets(const Automaton& NFA, Automaton& result, cons
 		powersetCache[currentSet] = equivalencePowersets[currentEqClass];
 		return equivalencePowersets[currentEqClass];
 	}
+	insertionsPerLevel[level]++;
 	for (auto node : currentSet)
 	{
 		maxInsertions[node]++;
@@ -698,13 +707,44 @@ size_t recurseEquivalencePowersets(const Automaton& NFA, Automaton& result, cons
 	return eqClassName;
 }
 
+template <typename T>
+T vecMax(const std::vector<T>& vec)
+{
+	T result = vec[0];
+	for (auto item : vec)
+	{
+		result = std::max(result, item);
+	}
+	return result;
+}
+
+template <typename T, typename U>
+U mapMax(const std::map<T, U>& map)
+{
+	U result {};
+	for (auto pair : map)
+	{
+		result = std::max(result, pair.second);
+	}
+	return result;
+}
+
 Automaton powersetDFA(const Automaton& NFA)
 {
 	Automaton result;
+	std::vector<size_t> maxChecks;
 	std::vector<size_t> maxTraversals;
 	std::vector<size_t> maxInsertions;
+	std::vector<size_t> checksPerLevel;
+	std::vector<size_t> traversalsPerLevel;
+	std::vector<size_t> insertionsPerLevel;
+	std::map<std::pair<size_t, size_t>, size_t> maxEdgeTraversals;
+	maxChecks.resize(NFA.transitions.size(), 0);
 	maxTraversals.resize(NFA.transitions.size(), 0);
 	maxInsertions.resize(NFA.transitions.size(), 0);
+	checksPerLevel.resize(NFA.transitions.size(), 0);
+	traversalsPerLevel.resize(NFA.transitions.size(), 0);
+	insertionsPerLevel.resize(NFA.transitions.size(), 0);
 	std::map<std::tuple<size_t, size_t, size_t, size_t, size_t>, size_t> equivalencePowersets;
 	std::map<std::set<size_t>, size_t> powersetCache;
 	std::set<size_t> starts;
@@ -718,19 +758,14 @@ Automaton powersetDFA(const Automaton& NFA)
 			}
 		}
 	}
-	size_t start = recurseEquivalencePowersets(NFA, result, starts, equivalencePowersets, powersetCache, maxTraversals, maxInsertions);
-	size_t maxTraversal = 0;
-	for (size_t i = 0; i < maxTraversals.size(); i++)
-	{
-		maxTraversal = std::max(maxTraversal, maxTraversals[i]);
-	}
-	std::cerr << "max traversal " << maxTraversal << std::endl;
-	size_t maxInsertion = 0;
-	for (size_t i = 0; i < maxInsertions.size(); i++)
-	{
-		maxInsertion = std::max(maxInsertion, maxInsertions[i]);
-	}
-	std::cerr << "max insertion " << maxInsertion << std::endl;
+	size_t start = recurseEquivalencePowersets(NFA, result, starts, equivalencePowersets, powersetCache, 0, checksPerLevel, traversalsPerLevel, insertionsPerLevel, maxChecks, maxTraversals, maxInsertions, maxEdgeTraversals);
+	std::cerr << "check per level " << vecMax(checksPerLevel) << std::endl;
+	std::cerr << "traversal per level " << vecMax(traversalsPerLevel) << std::endl;
+	std::cerr << "insertion per level " << vecMax(insertionsPerLevel) << std::endl;
+	std::cerr << "max check " << vecMax(maxChecks) << std::endl;
+	std::cerr << "max traversal " << vecMax(maxTraversals) << std::endl;
+	std::cerr << "max insertion " << vecMax(maxInsertions) << std::endl;
+	std::cerr << "max edge traversals " << mapMax(maxEdgeTraversals) << std::endl;
 	result.transitions.emplace_back();
 	result.transitions.back().emplace_back(start, 's');
 	return result;
