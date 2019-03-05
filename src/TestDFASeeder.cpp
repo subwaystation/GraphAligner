@@ -890,30 +890,30 @@ void testOneGraph(std::string filename, int numColumns)
 	std::cerr << "input graph edges: " << graphEdgeSize << std::endl;
 	std::cerr << "input graph is deterministic: " << (originalGraphDeterministic ? "yes" : "no") << std::endl;
 	std::cerr << "grid size: " << currentGraph.transitions.size() << std::endl;
-	auto noneqGrid = toNxMWithoutEquivalence(alnGraph, numColumns);
-	std::cerr << "non-equivalent grid size: " << noneqGrid.transitions.size() << std::endl;
+	// auto noneqGrid = toNxMWithoutEquivalence(alnGraph, numColumns);
+	// std::cerr << "non-equivalent grid size: " << noneqGrid.transitions.size() << std::endl;
 	currentGraph = reverse(filterReachable(reverse(filterReachable(currentGraph, 's')), 'e'));
 	std::cerr << "reachable size: " << currentGraph.transitions.size() << std::endl;
-	noneqGrid = reverse(filterReachable(reverse(filterReachable(noneqGrid, 's')), 'e'));
-	std::cerr << "non-equivalent reachable size: " << currentGraph.transitions.size() << std::endl;
+	// noneqGrid = reverse(filterReachable(reverse(filterReachable(noneqGrid, 's')), 'e'));
+	// std::cerr << "non-equivalent reachable size: " << currentGraph.transitions.size() << std::endl;
 	auto DFA = powersetDFA(currentGraph);
 	std::cerr << "DFA size: " << DFA.transitions.size() << std::endl;
 	std::cerr << "DFA number of forward non-deterministic forks: " << nonDeterministicForks(DFA) << std::endl;
 	DFA = reduce(DFA);
 	std::cerr << "minDFA size: " << DFA.transitions.size() << std::endl;
-	auto noneqDFA = powersetDFA(noneqGrid);
-	std::cerr << "non-equivalent DFA size: " << noneqDFA.transitions.size() << std::endl;
-	std::cerr << "non-equivalent number of forward non-deterministic forks: " << nonDeterministicForks(noneqDFA) << std::endl;
-	noneqDFA = reduce(noneqDFA);
-	std::cerr << "non-equivalent minDFA size: " << noneqDFA.transitions.size() << std::endl;
-	auto directConstruction = powersetDirectly(simplerGraph(alnGraph), numColumns);
-	std::cerr << "direct construction DFA size: " << directConstruction.transitions.size() << std::endl;
-	std::cerr << "direct construction number of forward non-deterministic forks: " << nonDeterministicForks(directConstruction) << std::endl;
-	directConstruction = reduce(directConstruction);
-	std::cerr << "direct construction minDFA size: " << directConstruction.transitions.size() << std::endl;
+	// auto noneqDFA = powersetDFA(noneqGrid);
+	// std::cerr << "non-equivalent DFA size: " << noneqDFA.transitions.size() << std::endl;
+	// std::cerr << "non-equivalent number of forward non-deterministic forks: " << nonDeterministicForks(noneqDFA) << std::endl;
+	// noneqDFA = reduce(noneqDFA);
+	// std::cerr << "non-equivalent minDFA size: " << noneqDFA.transitions.size() << std::endl;
+	// auto directConstruction = powersetDirectly(simplerGraph(alnGraph), numColumns);
+	// std::cerr << "direct construction DFA size: " << directConstruction.transitions.size() << std::endl;
+	// std::cerr << "direct construction number of forward non-deterministic forks: " << nonDeterministicForks(directConstruction) << std::endl;
+	// directConstruction = reduce(directConstruction);
+	// std::cerr << "direct construction minDFA size: " << directConstruction.transitions.size() << std::endl;
 	std::cerr << "Final size Q=" << DFA.transitions.size() << ", m|E|+3=" << (graphEdgeSize * numColumns + 3) << ", Q/(m|E|+3)=" << ((double)DFA.transitions.size() / (double)(graphEdgeSize * numColumns + 3)) << std::endl;
-	std::cerr << "Final non-equivalent size Q=" << noneqDFA.transitions.size() << ", m|E|+3=" << (graphEdgeSize * numColumns + 3) << ", Q/(m|E|+3)=" << ((double)noneqDFA.transitions.size() / (double)(graphEdgeSize * numColumns + 3)) << std::endl;
-	std::cerr << "Direct construction size Q=" << directConstruction.transitions.size() << ", m|E|+3=" << (graphEdgeSize * numColumns + 3) << ", Q/(m|E|+3)=" << ((double)directConstruction.transitions.size() / (double)(graphEdgeSize * numColumns + 3)) << std::endl;
+	// std::cerr << "Final non-equivalent size Q=" << noneqDFA.transitions.size() << ", m|E|+3=" << (graphEdgeSize * numColumns + 3) << ", Q/(m|E|+3)=" << ((double)noneqDFA.transitions.size() / (double)(graphEdgeSize * numColumns + 3)) << std::endl;
+	// std::cerr << "Direct construction size Q=" << directConstruction.transitions.size() << ", m|E|+3=" << (graphEdgeSize * numColumns + 3) << ", Q/(m|E|+3)=" << ((double)directConstruction.transitions.size() / (double)(graphEdgeSize * numColumns + 3)) << std::endl;
 }
 
 template <typename F>
