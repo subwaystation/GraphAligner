@@ -4,6 +4,7 @@
 #include <regex>
 #include <fstream>
 #include <string>
+#include "GraphAlignerBitvectorBanded.h"
 #include "BigraphToDigraph.h"
 #include "vg.pb.h"
 #include "AlignmentGraph.h"
@@ -18,18 +19,31 @@
 struct FusionAlignment
 {
 	FusionAlignment() {}
-	FusionAlignment(std::shared_ptr<vg::Alignment> alignment, std::string leftGene, std::string rightGene, int scoreDifference, std::string corrected) :
-		alignment(alignment),
-		leftGene(leftGene),
-		rightGene(rightGene),
-		scoreDifference(scoreDifference),
-		corrected(corrected)
-	{}
-	std::shared_ptr<vg::Alignment> alignment;
+	std::string readName;
+	double scoreFraction;
+	std::string leftExon;
+	bool leftReverse;
+	std::string rightExon;
+	bool rightReverse;
+	size_t leftLen;
+	size_t rightLen;
 	std::string leftGene;
 	std::string rightGene;
 	int scoreDifference;
 	std::string corrected;
+};
+
+struct BestPrefixAlignment
+{
+	std::vector<int> scores;
+	std::vector<size_t> geneIndex;
+};
+
+struct PrefixSuffixAlignment
+{
+	std::string leftGene;
+	std::string rightGene;
+	size_t breakpoint;
 };
 
 std::string geneFromTranscript(std::string transcript)
@@ -42,22 +56,6 @@ std::string geneFromTranscript(std::string transcript)
 	assert(match.size() >= 2);
 	assert(match[1].matched);
 	return std::string { match[1].first, match[1].second };
-}
-
-std::vector<std::pair<std::string, std::string>> loadPutativeFusions(std::string filename, int minPutativeSupport)
-{
-	std::ifstream file { filename };
-	std::vector<std::pair<std::string, std::string>> result;
-	while (file.good())
-	{
-		std::string left = "", right = "";
-		int support = 0;
-		file >> left >> right >> support;
-		if (!file.good()) break;
-		if (left == right) continue;
-		if (support >= minPutativeSupport) result.emplace_back(left, right);
-	}
-	return result;
 }
 
 std::unordered_map<std::string, std::unordered_set<int>> getGeneBelongers(const std::vector<vg::Alignment>& alns, const GfaGraph& graph)
@@ -81,291 +79,99 @@ GfaGraph getNonfusionGraph(std::string gene, const GfaGraph& graph, const std::u
 	return graph.GetSubgraph(geneBelongers.at(gene));
 }
 
-GfaGraph getFusionGraph(std::string leftGene, std::string rightGene, const GfaGraph& graph, const std::unordered_map<std::string, std::unordered_set<int>>& geneBelongers)
+void addBestPrefixAlns(BestPrefixAlignment& bestAlns, size_t geneIndex, const GraphAlignerBitvectorBanded<size_t, int32_t, uint64_t>& tableGetter, GraphAlignerCommon<size_t, int32_t, uint64_t>::AlignerGraphsizedState& reusableState, const FastQ& read)
 {
-	assert(geneBelongers.count(leftGene) == 1);
-	assert(geneBelongers.count(rightGene) == 1);
-	GfaGraph result;
-	result.edgeOverlap = 0;
-	result.nodes[0] = 'N';
-	result.nodes[1] = 'N';
-	result.nodes[2] = 'N';
-	result.nodes[3] = 'N';
-	result.originalNodeName[0] = "DUMMY_MIDDLE";
-	result.originalNodeName[1] = "DUMMY_MIDDLE";
-	result.originalNodeName[2] = "DUMMY_MIDDLE";
-	result.originalNodeName[3] = "DUMMY_MIDDLE";
-	int nextNodeId = 4;
-	for (int leftOrientationI = 0; leftOrientationI <= 1; leftOrientationI++)
+	auto table = tableGetter.getTableFromFullStart(read.sequence[0], read.sequence.substr(1), true, reusableState);
+	if (bestAlns.scores.size() == 0)
 	{
-		for (int rightOrientationI = 0; rightOrientationI <= 1; rightOrientationI++)
-		{
-			int subgraphNumber = leftOrientationI * 2 + rightOrientationI;
-			bool leftOrientation = leftOrientationI == 1 ? true : false;
-			bool rightOrientation = rightOrientationI == 1 ? true : false;
-			std::unordered_map<int, int> nodeStart;
-			std::unordered_map<int, int> nodeEnd;
-			assert(geneBelongers.count(leftGene) == 1);
-			assert(geneBelongers.at(leftGene).size() >= 1);
-			for (auto node : geneBelongers.at(leftGene))
-			{
-				nodeStart[node] = nextNodeId;
-				auto seq = graph.nodes.at(node);
-				for (size_t i = 0; i < seq.size(); i++)
-				{
-					if (i > 0) result.edges[NodePos { nextNodeId-1, true }].emplace_back(nextNodeId, true);
-					result.nodes[nextNodeId] = seq[i];
-					result.originalNodeName[nextNodeId] = graph.originalNodeName.at(node);
-					result.edges[NodePos { nextNodeId, leftOrientation }].emplace_back(subgraphNumber, true);
-					nextNodeId++;
-				}
-				nodeEnd[node] = nextNodeId-1;
-			}
-			for (auto node : geneBelongers.at(leftGene))
-			{
-				assert(nodeEnd.count(node) == 1);
-				int nodeid = nodeEnd.at(node);
-				if (graph.edges.count(NodePos { node, true }) == 1)
-				{
-					for (auto edge : graph.edges.at(NodePos { node, true }))
-					{
-						assert(graph.nodes.count(edge.id) == 1);
-						if (geneBelongers.at(leftGene).count(edge.id) == 0) continue;
-						assert(edge.end);
-						assert(nodeStart.count(edge.id) == 1);
-						int targetNodeId = nodeStart.at(edge.id);
-						result.edges[NodePos { nodeid, true }].emplace_back(targetNodeId, true);
-					}
-				}
-			}
-			nodeStart.clear();
-			nodeEnd.clear();
-			for (auto node : geneBelongers.at(rightGene))
-			{
-				nodeStart[node] = nextNodeId;
-				auto seq = graph.nodes.at(node);
-				for (size_t i = 0; i < seq.size(); i++)
-				{
-					if (i > 0) result.edges[NodePos { nextNodeId-1, true }].emplace_back(nextNodeId, true);
-					result.nodes[nextNodeId] = seq[i];
-					result.originalNodeName[nextNodeId] = graph.originalNodeName.at(node);
-					result.edges[NodePos { subgraphNumber, true }].emplace_back(nextNodeId, rightOrientation);
-					nextNodeId++;
-				}
-				nodeEnd[node] = nextNodeId-1;
-			}
-			for (auto node : geneBelongers.at(rightGene))
-			{
-				assert(nodeEnd.count(node) == 1);
-				int nodeid = nodeEnd.at(node);
-				if (graph.edges.count(NodePos { node, true }) == 1)
-				{
-					for (auto edge : graph.edges.at(NodePos { node, true }))
-					{
-						assert(graph.nodes.count(edge.id) == 1);
-						if (geneBelongers.at(rightGene).count(edge.id) == 0) continue;
-						assert(edge.end);
-						assert(nodeStart.count(edge.id) == 1);
-						int targetNodeId = nodeStart.at(edge.id);
-						result.edges[NodePos { nodeid, true }].emplace_back(targetNodeId, true);
-					}
-				}
-			}
-		}
+		bestAlns.scores.resize(read.sequence.size()-1, std::numeric_limits<int>::max() - read.sequence.size());
+		bestAlns.geneIndex.resize(read.sequence.size()-1, 0);
 	}
-	return result;
-}
-
-std::string getCorrected(const vg::Alignment& aln, const GfaGraph& graph)
-{
-	std::string result;
-	for (int i = 0; i < aln.path().mapping_size(); i++)
+	assert(bestAlns.scores.size() == read.sequence.size()-1);
+	assert(bestAlns.geneIndex.size() == read.sequence.size()-1);
+	for (size_t i = 1; i < table.slices.size(); i++)
 	{
-		for (int j = 0; j < aln.path().mapping(i).edit_size(); j++)
+		for (size_t o = 0; o < 64; o++)
 		{
-			std::string n = graph.nodes.at(aln.path().mapping(i).position().node_id());
-			if (aln.path().mapping(i).position().is_reverse()) n = CommonUtils::ReverseComplement(n);
-			result += n.substr(aln.path().mapping(i).position().offset(), aln.path().mapping(i).edit(j).from_length());
-		}
-	}
-	return result;
-}
-
-void addBestAlnsOnePair(std::unordered_map<std::string, FusionAlignment>& bestAlns, std::string leftGene, std::string rightGene, const GfaGraph& fusiongraph, const std::vector<FastQ>& reads, double maxScoreFraction, int minFusionLen)
-{
-	auto alignmentGraph = DirectedGraph::BuildFromGFA(fusiongraph, true);
-	GraphAlignerCommon<size_t, int32_t, uint64_t>::AlignerGraphsizedState reusableState { alignmentGraph, 1000, true };
-	for (auto read : reads)
-	{
-		try
-		{
-			auto alignments = AlignOneWay(alignmentGraph, read.seq_id, read.sequence, 1000, 1000, true, reusableState, true, true, false);
-			replaceDigraphNodeIdsWithOriginalNodeIds(*alignments.alignments[0].alignment, alignmentGraph);
-			if (alignments.alignments[0].alignment->score() > read.sequence.size() * maxScoreFraction) continue;
-			int leftAlnSize = 0;
-			int rightAlnSize = 0;
-			bool crossedDummy = false;
-			for (int i = 0; i < alignments.alignments[0].alignment->path().mapping_size(); i++)
+			size_t j = table.slices[i].j + o;
+			if (j >= bestAlns.scores.size()) break;
+			auto score = table.slices[i].minPerRow.getValue(o);
+			if (score < bestAlns.scores[j])
 			{
-				if (alignments.alignments[0].alignment->path().mapping(i).position().name().substr(0, 12) == "DUMMY_MIDDLE")
-				{
-					crossedDummy = true;
-					continue;
-				}
-				if (!crossedDummy)
-				{
-					leftAlnSize += alignments.alignments[0].alignment->path().mapping(i).edit(0).to_length();
-				}
-				else
-				{
-					rightAlnSize += alignments.alignments[0].alignment->path().mapping(i).edit(0).to_length();
-				}
+				bestAlns.scores[j] = score;
+				bestAlns.geneIndex[j] = geneIndex;
 			}
-			if (leftAlnSize < minFusionLen || rightAlnSize < minFusionLen) continue;
-			if (bestAlns.count(read.seq_id) == 0 || alignments.alignments[0].alignment->score() < bestAlns.at(read.seq_id).alignment->score())
-			{
-				bestAlns[read.seq_id] = FusionAlignment { alignments.alignments[0].alignment, leftGene, rightGene, 0, getCorrected(*alignments.alignments[0].alignment, fusiongraph) };
-			}
-		}
-		catch (ThreadReadAssertion::AssertionFailure& e)
-		{
-			reusableState.clear();
 		}
 	}
 }
 
-std::vector<FusionAlignment> getBestAlignments(const std::vector<std::pair<std::string, std::string>>& putativeFusions, const std::unordered_map<std::string, std::vector<size_t>>& hasSeeds, const GfaGraph& graph, const std::unordered_map<std::string, std::unordered_set<int>>& geneBelongers, const std::vector<FastQ>& allReads, double maxScoreFraction, int minFusionLen, int fusionPenalty, size_t numThreads, std::unordered_map<std::string, std::unordered_set<size_t>> readsInNonfusionGraph)
+void mergeBestPrefixAlns(BestPrefixAlignment& to, const BestPrefixAlignment& from)
 {
-	std::cerr << "get fusions" << std::endl;
+	assert(to.scores.size() == from.scores.size());
+	assert(to.geneIndex.size() == from.geneIndex.size());
+	assert(to.scores.size() == to.geneIndex.size());
+	for (size_t i = 0; i < to.scores.size(); i++)
+	{
+		if (from.scores[i] < to.scores[i])
+		{
+			to.scores[i] = from.scores[i];
+			to.geneIndex[i] = from.geneIndex[i];
+		}
+	}
+}
+
+std::unordered_map<std::string, BestPrefixAlignment> getBestPrefixAlignments(const std::unordered_map<std::string, std::unordered_set<size_t>>& hasSeeds, const std::vector<std::string>& checkables, const GfaGraph& graph, const std::unordered_map<std::string, std::unordered_set<int>>& geneBelongers, const std::vector<FastQ>& reads, size_t numThreads)
+{
+	std::cerr << "get best prefix alignments" << std::endl;
 	std::vector<std::thread> threads;
+	std::vector<std::unordered_map<size_t, BestPrefixAlignment>> resultPerThread;
+	resultPerThread.resize(numThreads);
 	size_t nextPair = 0;
 	std::mutex nextPairMutex;
-	std::vector<std::unordered_map<std::string, FusionAlignment>> bestFusionAlnsPerThread;
-	std::mutex readsInNonfusionGraphMutex;
-	bestFusionAlnsPerThread.resize(numThreads);
 	for (size_t thread = 0; thread < numThreads; thread++)
 	{
-		threads.emplace_back([&putativeFusions, &readsInNonfusionGraph, &readsInNonfusionGraphMutex, &bestFusionAlnsPerThread, &allReads, thread, maxScoreFraction, minFusionLen, &nextPair, &graph, &geneBelongers, &hasSeeds, &nextPairMutex]()
+		threads.emplace_back([thread, &hasSeeds, &nextPair, &nextPairMutex, &checkables, &resultPerThread, &graph, &geneBelongers, &reads]()
 		{
 			while (true)
 			{
 				size_t i = 0;
 				{
 					std::lock_guard<std::mutex> lock { nextPairMutex };
-					if (nextPair == putativeFusions.size()) break;
+					if (nextPair == checkables.size()) break;
 					i = nextPair;
-					std::cerr << "fusion " << nextPair << "/" << putativeFusions.size() << std::endl;
+					std::cerr << "prefix gene " << nextPair << "/" << checkables.size() << std::endl;
 					nextPair += 1;
 				}
-				assert(putativeFusions[i].first != putativeFusions[i].second);
-				auto fusiongraph = getFusionGraph(putativeFusions[i].first, putativeFusions[i].second, graph, geneBelongers);
-				std::unordered_set<size_t> readsHere;
-				// if (hasSeeds.count(putativeFusions[i].first) == 0) continue;
-				// if (hasSeeds.count(putativeFusions[i].second) == 0) continue;
-				// readsHere.resize(hasSeeds.at(putativeFusions[i].first).size() + hasSeeds.at(putativeFusions[i].second).size(), 0);
-				// auto final = std::set_intersection(hasSeeds.at(putativeFusions[i].first).begin(), hasSeeds.at(putativeFusions[i].first).end(), hasSeeds.at(putativeFusions[i].second).begin(), hasSeeds.at(putativeFusions[i].second).end(), readsHere.begin());
-				// readsHere.resize(final - readsHere.begin());
-				if (hasSeeds.count(putativeFusions[i].first) == 1) readsHere.insert(hasSeeds.at(putativeFusions[i].first).begin(), hasSeeds.at(putativeFusions[i].first).end());
-				if (hasSeeds.count(putativeFusions[i].second) == 1) readsHere.insert(hasSeeds.at(putativeFusions[i].second).begin(), hasSeeds.at(putativeFusions[i].second).end());
+				auto nonfusiongraph = getNonfusionGraph(checkables[i], graph, geneBelongers);
+				auto alignmentGraph = DirectedGraph::BuildFromGFA(nonfusiongraph, true);
+				GraphAlignerCommon<size_t, int32_t, uint64_t>::AlignerGraphsizedState reusableState { alignmentGraph, 1000, false };
+				GraphAlignerCommon<size_t, int32_t, uint64_t>::Params params { 1000, 0, alignmentGraph, std::numeric_limits<size_t>::max(), true, false, false, true, true };
+				GraphAlignerBitvectorBanded<size_t, int32_t, uint64_t> tableGetter { params };
+				for (auto index : hasSeeds.at(checkables[i]))
 				{
-					std::lock_guard<std::mutex> lock { readsInNonfusionGraphMutex };
-					readsInNonfusionGraph[putativeFusions[i].first].insert(readsHere.begin(), readsHere.end());
-					readsInNonfusionGraph[putativeFusions[i].second].insert(readsHere.begin(), readsHere.end());
+					addBestPrefixAlns(resultPerThread[thread][index], i, tableGetter, reusableState, reads[index]);
 				}
-				std::vector<FastQ> reads;
-				for (auto index : readsHere)
-				{
-					reads.push_back(allReads[index]);
-				}
-				addBestAlnsOnePair(bestFusionAlnsPerThread[thread], putativeFusions[i].first, putativeFusions[i].second, fusiongraph, reads, maxScoreFraction, minFusionLen);
 			}
 		});
 	}
-	for (size_t i = 0; i < numThreads; i++)
+	for (size_t thread = 0; thread < numThreads; thread++)
 	{
-		threads[i].join();
+		threads[thread].join();
 	}
 	threads.clear();
-	std::cerr << "merge fusion results" << std::endl;
-	std::unordered_map<std::string, FusionAlignment> bestFusionAlns;
-	for (size_t i = 0; i < numThreads; i++)
-	{
-		for (auto pair : bestFusionAlnsPerThread[i])
-		{
-			if (bestFusionAlns.count(pair.first) == 0 || pair.second.alignment->score() < bestFusionAlns.at(pair.first).alignment->score())
-			{
-				bestFusionAlns[pair.first] = pair.second;
-			}
-		}
-	}
-	std::vector<std::unordered_map<std::string, FusionAlignment>> bestNonfusionAlnsPerThread;
-	bestNonfusionAlnsPerThread.resize(numThreads);
-	std::cerr << "get nonfusions" << std::endl;
-	nextPair = 0;
-	std::vector<std::string> fusionGenes;
-	for (auto pair : readsInNonfusionGraph)
-	{
-		fusionGenes.push_back(pair.first);
-	}
+	std::unordered_map<std::string, BestPrefixAlignment> result;
 	for (size_t thread = 0; thread < numThreads; thread++)
 	{
-		threads.emplace_back([&fusionGenes, &bestNonfusionAlnsPerThread, &allReads, thread, maxScoreFraction, minFusionLen, &nextPair, &graph, &geneBelongers, &readsInNonfusionGraph, &nextPairMutex]()
+		for (auto pair : resultPerThread[thread])
 		{
-			while (true)
+			if (result.count(reads[pair.first].seq_id) == 0)
 			{
-				size_t i = 0;
-				{
-					std::lock_guard<std::mutex> lock { nextPairMutex };
-					if (nextPair == fusionGenes.size()) break;
-					i = nextPair;
-					std::cerr << "nonfusion " << nextPair << "/" << fusionGenes.size() << std::endl;
-					nextPair += 1;
-				}
-				auto nonfusiongraph = getNonfusionGraph(fusionGenes[i], graph, geneBelongers);
-				assert(readsInNonfusionGraph.count(fusionGenes[i]) == 1);
-				std::vector<FastQ> reads;
-				for (auto index : readsInNonfusionGraph.at(fusionGenes[i]))
-				{
-					reads.push_back(allReads[index]);
-				}
-				addBestAlnsOnePair(bestNonfusionAlnsPerThread[thread], fusionGenes[i], fusionGenes[i], nonfusiongraph, reads, 1, 0);
-			}
-		});
-	}
-	for (size_t i = 0; i < numThreads; i++)
-	{
-		threads[i].join();
-	}
-	std::unordered_map<std::string, FusionAlignment> bestNonfusionAlns;
-	std::cerr << "merge nonfusion results" << std::endl;
-	for (size_t i = 0; i < numThreads; i++)
-	{
-		for (auto pair : bestNonfusionAlnsPerThread[i])
-		{
-			if (bestNonfusionAlns.count(pair.first) == 0 || pair.second.alignment->score() < bestNonfusionAlns.at(pair.first).alignment->score())
-			{
-				bestNonfusionAlns[pair.first] = pair.second;
-			}
-		}
-	}
-	std::cerr << "filter fusion by nonfusion" << std::endl;
-	std::vector<FusionAlignment> result;
-	for (auto aln : bestFusionAlns)
-	{
-		if (bestNonfusionAlns.count(aln.first) == 1)
-		{
-			if (bestNonfusionAlns.at(aln.first).alignment->score() <= aln.second.alignment->score() + fusionPenalty)
-			{
-				continue;
+				result[reads[pair.first].seq_id] = pair.second;
 			}
 			else
 			{
-				result.emplace_back(aln.second.alignment, aln.second.leftGene, aln.second.rightGene, aln.second.alignment->score() - bestNonfusionAlns.at(aln.first).alignment->score(), aln.second.corrected);
+				mergeBestPrefixAlns(result[reads[pair.first].seq_id], pair.second);
 			}
-		}
-		else
-		{
-			result.emplace_back(aln.second.alignment, aln.second.leftGene, aln.second.rightGene, aln.second.alignment->sequence().size() - aln.second.alignment->score(), aln.second.corrected);
 		}
 	}
 	return result;
@@ -376,86 +182,8 @@ void writeFusions(const std::vector<FusionAlignment>& result, std::string filena
 	std::ofstream file { filename };
 	for (auto aln : result)
 	{
-		auto fusionaln = aln.alignment;
-		int fusionIndex = -1;
-		size_t leftLen = 0;
-		size_t rightLen = 0;
-		for (int i = 0; i < fusionaln->path().mapping_size(); i++)
-		{
-			if (fusionaln->path().mapping(i).position().name().substr(0, 12) == "DUMMY_MIDDLE")
-			{
-				fusionIndex = i;
-				continue;
-			}
-			if (fusionIndex == -1)
-			{
-				leftLen += fusionaln->path().mapping(i).edit(0).to_length();
-			}
-			else
-			{
-				rightLen += fusionaln->path().mapping(i).edit(0).to_length();
-			}
-		}
-		assert(fusionIndex != -1);
-		assert(fusionIndex > 0);
-		assert(fusionIndex < fusionaln->path().mapping_size() - 1);
-		std::string leftName = fusionaln->path().mapping(fusionIndex-1).position().name();
-		std::string rightName = fusionaln->path().mapping(fusionIndex+1).position().name();
-		for (int i = fusionIndex-1; i >= 0; i--)
-		{
-			if (fusionaln->path().mapping(i).position().name() != leftName)
-			{
-				leftName = fusionaln->path().mapping(i).position().name();
-				break;
-			}
-		}
-		for (int i = fusionIndex+1; i < fusionaln->path().mapping_size(); i++)
-		{
-			if (fusionaln->path().mapping(i).position().name() != leftName)
-			{
-				leftName = fusionaln->path().mapping(i).position().name();
-				break;
-			}
-		}
-		bool leftReverse = fusionaln->path().mapping(fusionIndex-1).position().is_reverse();
-		bool rightReverse = fusionaln->path().mapping(fusionIndex+1).position().is_reverse();
-		if (fusionaln->path().mapping(fusionIndex).position().is_reverse())
-		{
-			std::swap(leftName, rightName);
-			std::swap(leftReverse, rightReverse);
-			leftReverse = !leftReverse;
-			rightReverse = !rightReverse;
-			std::swap(aln.leftGene, aln.rightGene);
-		}
-		file << fusionaln->name() << "\t" << ((double)fusionaln->score() / (double)fusionaln->sequence().size()) << "\t" << aln.scoreDifference << "\t" << aln.leftGene << "\t" << aln.rightGene << "\t" << leftLen << "\t" << leftName << "\t" << (leftReverse ? "-" : "+") << "\t" << rightName << "\t" << (rightReverse ? "-" : "+") << "\t" << rightLen << std::endl;
+		file << aln.readName << "\t" << aln.scoreFraction << "\t" << aln.scoreDifference << "\t" << aln.leftGene << "\t" << aln.rightGene << "\t" << aln.leftLen << "\t" << aln.leftExon << "\t" << (aln.leftReverse ? "-" : "+") << "\t" << aln.rightExon << "\t" << (aln.rightReverse ? "-" : "+") << "\t" << aln.rightLen << std::endl;
 	}
-}
-
-std::unordered_map<std::string, std::vector<size_t>> loadPartialToTranscripts(std::string filename, const std::vector<FastQ>& reads)
-{
-	std::unordered_map<std::string, size_t> readIndex;
-	for (size_t i = 0; i < reads.size(); i++)
-	{
-		readIndex[reads[i].seq_id] = i;
-	}
-	std::ifstream file { filename };
-	std::regex splitter("([^\\t]+)_pair\\d+_\\d+\\t([^\\t]+)\\t1");
-	std::unordered_map<std::string, std::vector<size_t>> result;
-	while (file.good())
-	{
-		std::string line;
-		std::getline(file, line);
-		if (!file.good()) break;
-		std::smatch match;
-		std::regex_search(line, match, splitter);
-		if (match.empty()) continue;
-		assert(match.size() == 3);
-		std::string read { match[1].first, match[1].second };
-		std::string transcript { match[2].first, match[2].second };
-		assert(readIndex.count(read) == 1);
-		result[geneFromTranscript(transcript)].push_back(readIndex[read]);
-	}
-	return result;
 }
 
 void writeCorrected(const std::vector<FusionAlignment>& result, const GfaGraph& graph, std::string filename)
@@ -463,12 +191,12 @@ void writeCorrected(const std::vector<FusionAlignment>& result, const GfaGraph& 
 	std::ofstream file { filename };
 	for (auto aln : result)
 	{
-		file << ">" << aln.alignment->name() << std::endl;
+		file << ">" << aln.readName << std::endl;
 		file << aln.corrected << std::endl;
 	}
 }
 
-std::unordered_map<std::string, std::unordered_set<size_t>> getExtraGeneMatches(const std::vector<vg::Alignment>& transcripts, const std::vector<FastQ>& reads)
+std::unordered_map<std::string, std::unordered_set<size_t>> getExtraGeneMatches(const std::vector<vg::Alignment>& transcripts, const std::vector<FastQ>& reads, size_t numThreads, int seedSize)
 {
 	GfaGraph fakeGraph;
 	std::vector<std::string> nameMapping;
@@ -478,14 +206,179 @@ std::unordered_map<std::string, std::unordered_set<size_t>> getExtraGeneMatches(
 		nameMapping.push_back(geneFromTranscript(transcript.name()));
 	}
 	auto seeder = MummerSeeder(fakeGraph, "");
+	std::vector<std::unordered_map<std::string, std::unordered_set<size_t>>> resultPerThread;
+	resultPerThread.resize(numThreads);
+	size_t nextIndex = 0;
+	std::mutex nextPairMutex;
+	std::vector<std::thread> threads;
+	for (size_t thread = 0; thread < numThreads; thread++)
+	{
+		threads.emplace_back([&nameMapping, &reads, &nextIndex, &nextPairMutex, &resultPerThread, thread, &seeder, seedSize]()
+		{
+			while (true)
+			{
+				size_t i = 0;
+				{
+					std::lock_guard<std::mutex> lock { nextPairMutex };
+					if (nextIndex == reads.size()) break;
+					i = nextIndex;
+					std::cerr << "seed " << nextIndex << "/" << reads.size() << std::endl;
+					nextIndex += 1;
+				}
+				auto seeds = seeder.getMemSeeds(reads[i].sequence, -1, seedSize);
+				for (auto seed : seeds)
+				{
+					resultPerThread[thread][nameMapping[seed.nodeID]].insert(i);
+				}
+			}
+		});
+	}
+	for (size_t thread = 0; thread < numThreads; thread++)
+	{
+		threads[thread].join();
+	}
+	threads.clear();
 	std::unordered_map<std::string, std::unordered_set<size_t>> result;
+	for (size_t i = 0; i < resultPerThread.size(); i++)
+	{
+		for (auto pair : resultPerThread[i])
+		{
+			result[pair.first].insert(pair.second.begin(), pair.second.end());
+		}
+	}
+	return result;
+}
+
+std::vector<FastQ> reverseComplements(const std::vector<FastQ>& reads)
+{
+	std::vector<FastQ> result;
+	result.reserve(reads.size());
 	for (size_t i = 0; i < reads.size(); i++)
 	{
-		auto seeds = seeder.getMemSeeds(reads[i].sequence, -1, 20);
-		for (auto seed : seeds)
+		result.push_back(reads[i].reverseComplement());
+	}
+	return result;
+}
+
+std::unordered_map<std::string, PrefixSuffixAlignment> mergePrefixSuffix(const std::unordered_map<std::string, BestPrefixAlignment>& prefixAlns, const std::unordered_map<std::string, BestPrefixAlignment>& suffixAlns, const std::vector<std::string>& geneOrder)
+{
+	std::unordered_map<std::string, PrefixSuffixAlignment> result;
+	assert(prefixAlns.size() == suffixAlns.size());
+	for (auto pair : prefixAlns)
+	{
+		auto prefix = pair.second;
+		auto suffix = suffixAlns.at(pair.first);
+		size_t bestIndex = 0;
+		int bestScore = prefix.scores[prefix.scores.size()-2] + suffix.scores[suffix.scores.size()-2];
+		assert(prefix.scores.back() - suffix.scores.back() >= -1 && prefix.scores.back() - suffix.scores.back() <= 1); // todo fix off by one error somewhere
+		assert(prefix.scores.size() == suffix.scores.size());
+		for (size_t i = 2; i < prefix.scores.size()-2; i++)
 		{
-			result[nameMapping[seed.nodeID]].insert(i);
+			int scoreHere = prefix.scores[i] + suffix.scores[suffix.scores.size()-i];
+			assert(scoreHere <= prefix.scores.back() + suffix.scores.back());
+			if (scoreHere < bestScore)
+			{
+				bestScore = scoreHere;
+				bestIndex = i;
+			}
 		}
+		assert(bestIndex != 0);
+		result[pair.first].leftGene = geneOrder[prefix.geneIndex[bestIndex]];
+		result[pair.first].rightGene = geneOrder[suffix.geneIndex[suffix.scores.size()-bestIndex]];
+		result[pair.first].breakpoint = bestIndex;
+	}
+	return result;
+}
+
+std::vector<std::string> getGeneOrder(const std::unordered_map<std::string, std::unordered_set<size_t>>& hasSeeds)
+{
+	std::vector<std::string> result;
+	for (auto pair : hasSeeds)
+	{
+		result.push_back(pair.first);
+	}
+	return result;
+}
+
+std::string getCorrected(const GfaGraph& graph, const vg::Alignment& leftAln, const vg::Alignment& rightAln)
+{
+	std::string result;
+	for (int i = 0; i < leftAln.path().mapping_size(); i++)
+	{
+		for (int j = 0; j < leftAln.path().mapping(i).edit_size(); j++)
+		{
+			std::string n = graph.nodes.at(leftAln.path().mapping(i).position().node_id());
+			if (leftAln.path().mapping(i).position().is_reverse()) n = CommonUtils::ReverseComplement(n);
+			result += n.substr(leftAln.path().mapping(i).position().offset(), leftAln.path().mapping(i).edit(j).from_length());
+		}
+	}
+	result += 'N';
+	for (int i = 0; i < rightAln.path().mapping_size(); i++)
+	{
+		for (int j = 0; j < rightAln.path().mapping(i).edit_size(); j++)
+		{
+			std::string n = graph.nodes.at(rightAln.path().mapping(i).position().node_id());
+			if (rightAln.path().mapping(i).position().is_reverse()) n = CommonUtils::ReverseComplement(n);
+			result += n.substr(rightAln.path().mapping(i).position().offset(), rightAln.path().mapping(i).edit(j).from_length());
+		}
+	}
+	return result;
+}
+
+std::pair<std::string, bool> getLastExon(const GfaGraph& graph, const vg::Alignment& aln)
+{
+	if (aln.path().mapping_size() == 1)
+	{
+		return std::make_pair(graph.originalNodeName.at(aln.path().mapping(0).position().node_id()), aln.path().mapping(0).position().is_reverse());
+	}
+	return std::make_pair(graph.originalNodeName.at(aln.path().mapping(aln.path().mapping_size()-2).position().node_id()), aln.path().mapping(aln.path().mapping_size()-2).position().is_reverse());
+}
+
+std::pair<std::string, bool> getFirstExon(const GfaGraph& graph, const vg::Alignment& aln)
+{
+	if (aln.path().mapping_size() == 1)
+	{
+		return std::make_pair(graph.originalNodeName.at(aln.path().mapping(0).position().node_id()), aln.path().mapping(0).position().is_reverse());
+	}
+	return std::make_pair(graph.originalNodeName.at(aln.path().mapping(1).position().node_id()), aln.path().mapping(1).position().is_reverse());
+}
+
+std::vector<FusionAlignment> getAlnFromMerge(const GfaGraph& graph, const std::unordered_map<std::string, std::unordered_set<int>>& geneBelongers, const std::unordered_map<std::string, PrefixSuffixAlignment>& pairs, const std::unordered_map<std::string, BestPrefixAlignment>& prefixAlns, const std::vector<FastQ>& reads, size_t numThreads)
+{
+	std::vector<FusionAlignment> result;
+	std::unordered_map<std::string, FastQ> readmap;
+	for (auto read : reads)
+	{
+		readmap[read.seq_id] = read;
+	}
+	for (auto pair : pairs)
+	{
+		auto read = readmap.at(pair.first);
+		auto leftGraph = getNonfusionGraph(pair.second.leftGene, graph, geneBelongers);
+		auto leftAlnGraph = DirectedGraph::BuildFromGFA(leftGraph, true);
+		GraphAlignerCommon<size_t, int32_t, uint64_t>::AlignerGraphsizedState leftReusableState { leftAlnGraph, 1000, false };
+		auto leftAlns = AlignOneWay(leftAlnGraph, read.seq_id, read.sequence.substr(0, pair.second.breakpoint), 1000, 1000, true, leftReusableState, false, true, false);
+		auto leftAln = *leftAlns.alignments[0].alignment;
+		replaceDigraphNodeIdsWithOriginalNodeIds(leftAln, leftAlnGraph);
+
+		auto rightGraph = getNonfusionGraph(pair.second.rightGene, graph, geneBelongers);
+		auto rightAlnGraph = DirectedGraph::BuildFromGFA(rightGraph, true);
+		GraphAlignerCommon<size_t, int32_t, uint64_t>::AlignerGraphsizedState rightReusableState { rightAlnGraph, 1000, false };
+		auto rightAlns = AlignOneWay(rightAlnGraph, read.seq_id, read.sequence.substr(pair.second.breakpoint), 1000, 1000, true, rightReusableState, false, true, false);
+		auto rightAln = *rightAlns.alignments[0].alignment;
+		replaceDigraphNodeIdsWithOriginalNodeIds(rightAln, rightAlnGraph);
+
+		result.emplace_back();
+		result.back().readName = pair.first;
+		result.back().scoreFraction = (double)(leftAln.score() + rightAln.score()) / (double)read.sequence.size();
+		std::tie(result.back().leftExon, result.back().leftReverse) = getLastExon(graph, leftAln);
+		std::tie(result.back().rightExon, result.back().rightReverse) = getFirstExon(graph, rightAln);
+		result.back().leftLen = pair.second.breakpoint;
+		result.back().rightLen = read.sequence.size() - pair.second.breakpoint;
+		result.back().leftGene = pair.second.leftGene;
+		result.back().rightGene = pair.second.rightGene;
+		result.back().scoreDifference = leftAln.score() + rightAln.score() - prefixAlns.at(read.seq_id).scores.back();
+		result.back().corrected = getCorrected(graph, leftAln, rightAln);
 	}
 	return result;
 }
@@ -495,34 +388,33 @@ int main(int argc, char** argv)
 	std::cerr << "Fusion finder " << VERSION << std::endl;
 
 	std::string graphFile { argv[1] };
-	std::string putativeFusionsFile { argv[2] };
-	std::string partialMatrixFile { argv[3] };
-	std::string transcriptAlignmentFile { argv[4] };
-	std::string readFile { argv[5] };
-	int minPutativeSupport = std::stoi(argv[6]);
-	double maxScoreFraction = std::stod(argv[7]);
-	int minFusionLen = std::stoi(argv[8]);
-	int fusionPenalty = std::stoi(argv[9]);
-	int numThreads = std::stoi(argv[10]);
-	std::string resultFusionFile { argv[11] };
-	std::string correctedReadsFile { argv[12] };
+	std::string transcriptAlignmentFile { argv[2] };
+	std::string readFile { argv[3] };
+	int numThreads = std::stoi(argv[4]);
+	int seedSize = std::stoi(argv[5]);
+	std::string resultFusionFile { argv[6] };
+	std::string correctedReadsFile { argv[7] };
 
 	std::cerr << "load graph" << std::endl;
 	auto graph = GfaGraph::LoadFromFile(graphFile);
-	std::cerr << "load putative fusions" << std::endl;
-	auto putativeFusions = loadPutativeFusions(putativeFusionsFile, minPutativeSupport);
 	std::cerr << "load reads" << std::endl;
 	auto reads = loadFastqFromFile(readFile);
-	std::cerr << "load partial assignments" << std::endl;
-	auto hasSeeds = loadPartialToTranscripts(partialMatrixFile, reads);
 	std::cerr << "load transcript alignments" << std::endl;
 	auto transcripts = CommonUtils::LoadVGAlignments(transcriptAlignmentFile);
 	std::cerr << "get gene belongers" << std::endl;
 	auto geneBelongers = getGeneBelongers(transcripts, graph);
 	std::cerr << "get extra gene-matches" << std::endl;
-	auto extraGeneMatches = getExtraGeneMatches(transcripts, reads);
-	std::cerr << "get alns" << std::endl;
-	auto bestAlns = getBestAlignments(putativeFusions, hasSeeds, graph, geneBelongers, reads, maxScoreFraction, minFusionLen, fusionPenalty, numThreads, extraGeneMatches);
+	auto extraGeneMatches = getExtraGeneMatches(transcripts, reads, numThreads, seedSize);
+	std::cerr << "get gene order" << std::endl;
+	auto geneOrder = getGeneOrder(extraGeneMatches);
+	std::cerr << "get prefix alignments" << std::endl;
+	auto prefixAlns = getBestPrefixAlignments(extraGeneMatches, geneOrder, graph, geneBelongers, reads, numThreads);
+	std::cerr << "get suffix alignments" << std::endl;
+	auto suffixAlns = getBestPrefixAlignments(extraGeneMatches, geneOrder, graph, geneBelongers, reverseComplements(reads), numThreads);
+	std::cerr << "merge prefix-suffix alignments" << std::endl;
+	auto pairs = mergePrefixSuffix(prefixAlns, suffixAlns, geneOrder);
+	std::cerr << "get fusions" << std::endl;
+	auto bestAlns = getAlnFromMerge(graph, geneBelongers, pairs, prefixAlns, reads, numThreads);
 	std::cerr << "write fusions" << std::endl;
 	writeFusions(bestAlns, resultFusionFile);
 	std::cerr << "write corrected reads" << std::endl;
