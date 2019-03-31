@@ -347,7 +347,6 @@ TransitiveClosureMapping getTransitiveClosures(const std::vector<Path>& paths, c
 	{
 		for (auto pair : aln.alignedPairs)
 		{
-			if (pair.leftIndex == -1 || pair.rightIndex == -1) continue;
 			std::pair<size_t, NodePos> leftKey { aln.leftPath, NodePos { pair.leftIndex, pair.leftReverse } };
 			std::pair<size_t, NodePos> rightKey { aln.rightPath, NodePos { pair.rightIndex, pair.rightReverse } };
 			set(parent, leftKey, rightKey);
@@ -513,6 +512,211 @@ std::vector<Alignment> removeContained(const std::vector<Path>& paths, const std
 	return result;
 }
 
+std::vector<Alignment> pickLowestErrorPerRead(const std::vector<Path>& paths, const std::vector<Alignment>& alns, size_t maxNum)
+{
+	std::vector<std::vector<Alignment>> alnsPerRead;
+	alnsPerRead.resize(paths.size());
+	for (auto aln : alns)
+	{
+		alnsPerRead[aln.leftPath].push_back(aln);
+		alnsPerRead[aln.rightPath].push_back(aln);
+	}
+	std::vector<Alignment> result;
+	for (size_t i = 0; i < alnsPerRead.size(); i++)
+	{
+		if (alnsPerRead[i].size() > maxNum)
+		{
+			std::sort(alnsPerRead[i].begin(), alnsPerRead[i].end(), [](const Alignment& left, const Alignment& right){ return left.alignmentIdentity < right.alignmentIdentity; });
+			for (size_t j = alnsPerRead[i].size() - maxNum; j < alnsPerRead[i].size(); j++)
+			{
+				result.push_back(alnsPerRead[i][j]);
+			}
+		}
+		else
+		{
+			result.insert(result.end(), alnsPerRead[i].begin(), alnsPerRead[i].end());
+		}
+	}
+	std::cerr << result.size() << " alignments after picking lowest erro" << std::endl;
+	return result;
+}
+
+std::vector<Alignment> pickLongestPerRead(const std::vector<Path>& paths, const std::vector<Alignment>& alns, size_t maxNum)
+{
+	std::vector<std::vector<Alignment>> alnsPerRead;
+	alnsPerRead.resize(paths.size());
+	for (auto aln : alns)
+	{
+		alnsPerRead[aln.leftPath].push_back(aln);
+		alnsPerRead[aln.rightPath].push_back(aln);
+	}
+	std::vector<Alignment> result;
+	for (size_t i = 0; i < alnsPerRead.size(); i++)
+	{
+		if (alnsPerRead[i].size() > maxNum)
+		{
+			std::sort(alnsPerRead[i].begin(), alnsPerRead[i].end(), [](const Alignment& left, const Alignment& right){ return left.alignmentLength < right.alignmentLength; });
+			for (size_t j = alnsPerRead[i].size() - maxNum; j < alnsPerRead[i].size(); j++)
+			{
+				result.push_back(alnsPerRead[i][j]);
+			}
+		}
+		else
+		{
+			result.insert(result.end(), alnsPerRead[i].begin(), alnsPerRead[i].end());
+		}
+	}
+	std::cerr << result.size() << " alignments after picking longest" << std::endl;
+	return result;
+}
+
+std::vector<Path> filterByLength(const std::vector<Path>& paths, size_t minLen)
+{
+	std::vector<Path> result;
+	for (auto path : paths)
+	{
+		size_t len = 0;
+		for (auto nodeSize : path.nodeSize)
+		{
+			len += nodeSize;
+		}
+		if (len >= minLen) result.push_back(path);
+	}
+	std::cerr << result.size() << " alignments after filtering by length" << std::endl;
+	return result;
+}
+
+DoublestrandedTransitiveClosureMapping removeLowCoverageClosures(const DoublestrandedTransitiveClosureMapping& closures, int minCoverage)
+{
+	std::unordered_map<size_t, size_t> coverage;
+	for (auto pair : closures.mapping)
+	{
+		coverage[pair.second.id] += 1;
+	}
+	DoublestrandedTransitiveClosureMapping result;
+	for (auto pair : closures.mapping)
+	{
+		if (coverage[pair.second.id] >= minCoverage)
+		{
+			result.mapping[pair.first] = pair.second;
+		}
+	}
+	std::cerr << result.mapping.size() << " closure items after removing low coverage" << std::endl;
+	return result;
+}
+
+DoublestrandedTransitiveClosureMapping insertMiddles(const DoublestrandedTransitiveClosureMapping& original, const std::vector<Path>& paths)
+{
+	DoublestrandedTransitiveClosureMapping result;
+	result = original;
+	int nextNum = 0;
+	for (auto pair : original.mapping)
+	{
+		nextNum = std::max(nextNum, pair.second.id);
+	}
+	nextNum =+ 1;
+	for (size_t i = 0; i < paths.size(); i++)
+	{
+		size_t firstExisting = paths[i].position.size();
+		size_t lastExisting = paths[i].position.size();
+		for (size_t j = 0; j < paths[i].position.size(); j++)
+		{
+			std::pair<size_t, size_t> key { i, j };
+			if (original.mapping.count(key) == 1)
+			{
+				if (firstExisting == paths[i].position.size()) firstExisting = j;
+				lastExisting = j;
+			}
+		}
+		for (size_t j = firstExisting; j < lastExisting; j++)
+		{
+			std::pair<size_t, size_t> key { i, j };
+			if (original.mapping.count(key) == 1) continue;
+			result.mapping[key] = NodePos { nextNum, true };
+			nextNum += 1;
+		}
+	}
+	std::cerr << nextNum << " transitive closure sets after inserting middles" << std::endl;
+	std::cerr << result.mapping.size() << " transitive closure items after inserting middles" << std::endl;
+	return result;
+}
+
+std::vector<Alignment> removeHighCoverageAlignments(const std::vector<Path>& paths, const std::vector<Alignment>& alns, size_t maxCoverage)
+{
+	std::vector<std::vector<size_t>> alnsPerRead;
+	std::vector<bool> validAln;
+	validAln.resize(alns.size(), true);
+	alnsPerRead.resize(paths.size());
+	for (size_t i = 0; i < alns.size(); i++)
+	{
+		alnsPerRead[alns[i].leftPath].push_back(i);
+		alnsPerRead[alns[i].rightPath].push_back(i);
+	}
+	for (size_t i = 0; i < paths.size(); i++)
+	{
+		std::vector<size_t> startCount;
+		std::vector<size_t> endCount;
+		startCount.resize(paths[i].position.size(), 0);
+		endCount.resize(paths[i].position.size(), 0);
+		for (auto alnIndex : alnsPerRead[i])
+		{
+			auto aln = alns[alnIndex];
+			if (aln.leftPath == i)
+			{
+				startCount[aln.leftStart] += 1;
+				endCount[aln.leftEnd] += 1;
+			}
+			else
+			{
+				startCount[aln.rightStart] += 1;
+				endCount[aln.rightEnd] += 1;
+			}
+		}
+		std::vector<size_t> coverage;
+		coverage.resize(paths[i].position.size(), 0);
+		coverage[0] = startCount[0];
+		for (size_t j = 1; j < coverage.size(); j++)
+		{
+			coverage[j] = coverage[j-1] + startCount[j] - endCount[j-1];
+		}
+		for (auto alnIndex : alnsPerRead[i])
+		{
+			auto aln = alns[alnIndex];
+			bool valid = false;
+			size_t start, end;
+			if (aln.leftPath == i)
+			{
+				start = aln.leftStart;
+				end = aln.leftEnd;
+			}
+			else
+			{
+				start = aln.rightStart;
+				end = aln.rightEnd;
+			}
+			for (size_t j = start; j <= end; j++)
+			{
+				if (coverage[j] <= maxCoverage)
+				{
+					valid = true;
+					break;
+				}
+			}
+			if (!valid)
+			{
+				validAln[alnIndex] = false;
+			}
+		}
+	}
+	std::vector<Alignment> result;
+	for (size_t i = 0; i < validAln.size(); i++)
+	{
+		if (validAln[i]) result.push_back(alns[i]);
+	}
+	std::cerr << result.size() << " after removing high coverage alignments" << std::endl;
+	return result;
+}
+
 int main(int argc, char** argv)
 {
 	std::string inputGraph { argv[1] };
@@ -524,6 +728,8 @@ int main(int argc, char** argv)
 	std::string outputGraph { argv[7] };
 	int numThreads = std::stoi(argv[8]);
 
+	std::cerr << minAlnIdentity << std::endl;
+
 	std::cerr << "load graph" << std::endl;
 	auto graph = GfaGraph::LoadFromFile(inputGraph);
 	graph.confirmDoublesidedEdges();
@@ -531,16 +737,30 @@ int main(int argc, char** argv)
 	auto paths = loadAlignmentsAsPaths(inputAlns);
 	std::cerr << "add node lengths" << std::endl;
 	paths = addNodeLengths(paths, graph);
+	std::cerr << "filter alignments on length" << std::endl;
+	paths = filterByLength(paths, 1000);
 	std::cerr << "induce overlaps" << std::endl;
 	auto alns = induceOverlaps(paths, mismatchPenalty, minAlnLength, minAlnIdentity, numThreads);
-	std::cerr << "remove contained alignments" << std::endl;
-	alns = removeContained(paths, alns);
+	// std::cerr << "pick longest alignments" << std::endl;
+	// alns = pickLongestPerRead(paths, alns, 5);
+	// std::cerr << "remove contained alignments" << std::endl;
+	// alns = removeContained(paths, alns);
+	std::cerr << "double alignments" << std::endl;
+	alns = doubleAlignments(alns);
+	std::cerr << "remove high coverage alignments" << std::endl;
+	alns = removeHighCoverageAlignments(paths, alns, 15);
+	std::cerr << "pick lowest error alignments" << std::endl;
+	alns = pickLowestErrorPerRead(paths, alns, 3);
 	std::cerr << "double alignments" << std::endl;
 	alns = doubleAlignments(alns);
 	std::cerr << "get transitive closure" << std::endl;
 	auto transitiveClosures = getTransitiveClosures(paths, alns);
 	std::cerr << "merge double strands" << std::endl;
 	auto doubleStrandedClosures = mergeDoublestrandClosures(paths, transitiveClosures);
+	std::cerr << "remove low coverage closures" << std::endl;
+	doubleStrandedClosures = removeLowCoverageClosures(doubleStrandedClosures, 5);
+	std::cerr << "insert middles" << std::endl;
+	doubleStrandedClosures = insertMiddles(doubleStrandedClosures, paths);
 	std::cerr << "graphify" << std::endl;
 	auto result = getGraph(doubleStrandedClosures, paths, graph);
 	std::cerr << "output" << std::endl;
