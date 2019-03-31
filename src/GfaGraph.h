@@ -18,6 +18,7 @@ public:
 	NodePos Reverse() const;
 	bool operator==(const NodePos& other) const;
 	bool operator!=(const NodePos& other) const;
+	bool operator<(const NodePos& other) const;
 };
 
 namespace std 

@@ -3,28 +3,58 @@
 #include <vector>
 #include <unordered_set>
 #include <unordered_map>
+#include <thread>
 #include "CommonUtils.h"
 #include "vg.pb.h"
 #include "GfaGraph.h"
+
+bool operator<(const std::pair<size_t, NodePos>& left, const std::pair<size_t, NodePos>& right)
+{
+	return left.first < right.first || (left.first == right.first && left.second < right.second);
+}
 
 struct Path
 {
 	std::vector<NodePos> position;
 	std::vector<size_t> nodeSize;
+	Path Reverse() const
+	{
+		Path result = *this;
+		std::reverse(result.position.begin(), result.position.end());
+		std::reverse(result.nodeSize.begin(), result.nodeSize.end());
+		for (size_t i = 0; i < result.position.size(); i++)
+		{
+			result.position[i] = result.position[i].Reverse();
+		}
+		return result;
+	}
+};
+
+struct AlignmentMatch
+{
+	size_t leftIndex;
+	size_t rightIndex;
+	bool leftReverse;
+	bool rightReverse;
 };
 
 struct Alignment
 {
 	size_t leftPath;
 	size_t rightPath;
-	std::vector<std::pair<size_t, size_t>> alignedPairs;
+	std::vector<AlignmentMatch> alignedPairs;
 	size_t alignmentLength;
 	double alignmentIdentity;
 };
 
 struct TransitiveClosureMapping
 {
-	std::map<std::pair<size_t, size_t>, size_t> mapping;
+	std::map<std::pair<size_t, NodePos>, size_t> mapping;
+};
+
+struct DoublestrandedTransitiveClosureMapping
+{
+	std::map<std::pair<size_t, size_t>, NodePos> mapping;
 };
 
 std::vector<Path> loadAlignmentsAsPaths(std::string fileName)
@@ -66,8 +96,8 @@ std::vector<Alignment> align(const std::vector<NodePos>& leftPath, const std::ve
 		Mismatch,
 		Start
 	};
-	static std::vector<std::vector<double>> DPscores;
-	static std::vector<std::vector<BacktraceType>> DPtrace;
+	static thread_local std::vector<std::vector<double>> DPscores;
+	static thread_local std::vector<std::vector<BacktraceType>> DPtrace;
 	if (DPscores.size() < leftPath.size()+1) DPscores.resize(leftPath.size()+1);
 	if (DPtrace.size() < leftPath.size()+1) DPtrace.resize(leftPath.size()+1);
 	if (DPscores.back().size() < rightPath.size()+1)
@@ -146,7 +176,9 @@ std::vector<Alignment> align(const std::vector<NodePos>& leftPath, const std::ve
 					continue;
 				case Match:
 					assert(leftSize == rightSize);
-					result.back().alignedPairs.emplace_back(maxI-1, maxJ-1);
+					result.back().alignedPairs.emplace_back();
+					result.back().alignedPairs.back().leftIndex = maxI-1;
+					result.back().alignedPairs.back().rightIndex = maxJ-1;
 					matchLen += leftSize;
 					maxI -= 1;
 					maxJ -= 1;
@@ -174,44 +206,91 @@ std::vector<Alignment> align(const std::vector<NodePos>& leftPath, const std::ve
 	return result;
 }
 
-std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size_t minAlnLength, double minAlnIdentity)
+std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size_t minAlnLength, double minAlnIdentity, int numThreads)
 {
 	std::vector<Alignment> result;
-	std::unordered_map<NodePos, std::vector<size_t>> crossesNode;
+	std::vector<Path> reversePaths;
+	reversePaths.reserve(paths.size());
+	for (size_t i = 0; i < paths.size(); i++)
+	{
+		reversePaths.push_back(paths[i].Reverse());
+	}
+	std::unordered_map<size_t, std::vector<size_t>> crossesNode;
 	for (size_t i = 0; i < paths.size(); i++)
 	{
 		for (auto node : paths[i].position)
 		{
-			crossesNode[node].push_back(i);
+			crossesNode[node.id].push_back(i);
 		}
 	}
-	for (size_t i = 0; i < paths.size(); i++)
+	std::vector<std::vector<Alignment>> resultsPerThread;
+	resultsPerThread.resize(numThreads);
+	std::vector<std::thread> threads;
+	std::mutex nextReadMutex;
+	size_t nextRead = 0;
+	for (size_t thread = 0; thread < numThreads; thread++)
 	{
-		std::cerr << i << "/" << paths.size() << std::endl;
-		std::unordered_map<size_t, size_t> possibleMatches;
-		for (size_t j = 0; j < paths[i].position.size(); j++)
+		threads.emplace_back([&paths, &nextRead, &nextReadMutex, &resultsPerThread, thread, &crossesNode, minAlnIdentity, minAlnLength, mismatchPenalty, &reversePaths]()
 		{
-			auto node = paths[i].position[j];
-			size_t nodeSize = paths[i].nodeSize[j];
-			for (auto other : crossesNode[node])
+			while (true)
 			{
-				if (other <= i) continue;
-				possibleMatches[other] += nodeSize;
+				size_t i = 0;
+				{
+					std::lock_guard<std::mutex> guard { nextReadMutex };
+					i = nextRead;
+					nextRead += 1;
+				}
+				if (i >= paths.size()) break;
+				std::cerr << i << "/" << paths.size() << std::endl;
+				std::unordered_map<size_t, size_t> possibleMatches;
+				for (size_t j = 0; j < paths[i].position.size(); j++)
+				{
+					auto node = paths[i].position[j];
+					size_t nodeSize = paths[i].nodeSize[j];
+					for (auto other : crossesNode[node.id])
+					{
+						if (other <= i) continue;
+						possibleMatches[other] += nodeSize;
+					}
+				}
+				for (auto pair : possibleMatches)
+				{
+					size_t j = pair.first;
+					if (pair.second < minAlnLength) continue;
+					if (i == j) continue;
+					auto fwAlns = align(paths[i].position, paths[j].position, paths[i].nodeSize, paths[j].nodeSize, i, j, mismatchPenalty);
+					for (auto aln : fwAlns)
+					{
+						if (aln.alignmentLength < minAlnLength) continue;
+						if (aln.alignmentIdentity < minAlnIdentity) continue;
+						for (size_t i = 0; i < aln.alignedPairs.size(); i++)
+						{
+							aln.alignedPairs[i].leftReverse = false;
+							aln.alignedPairs[i].rightReverse = false;
+						}
+						resultsPerThread[thread].push_back(aln);
+					}
+					auto bwAlns = align(paths[i].position, reversePaths[j].position, paths[i].nodeSize, reversePaths[j].nodeSize, i, j, mismatchPenalty);
+					for (auto aln : bwAlns)
+					{
+						if (aln.alignmentLength < minAlnLength) continue;
+						if (aln.alignmentIdentity < minAlnIdentity) continue;
+						for (size_t i = 0; i < aln.alignedPairs.size(); i++)
+						{
+							aln.alignedPairs[i].leftReverse = false;
+							aln.alignedPairs[i].rightReverse = true;
+							aln.alignedPairs[i].rightIndex = paths[j].position.size() - 1 - aln.alignedPairs[i].rightIndex;
+						}
+						resultsPerThread[thread].push_back(aln);
+					}
+				}
 			}
-		}
-		for (auto pair : possibleMatches)
-		{
-			size_t j = pair.first;
-			if (pair.second < minAlnLength) continue;
-			if (i == j) continue;
-			auto alns = align(paths[i].position, paths[j].position, paths[i].nodeSize, paths[j].nodeSize, i, j, mismatchPenalty);
-			for (auto aln : alns)
-			{
-				if (aln.alignmentLength < minAlnLength) continue;
-				if (aln.alignmentIdentity < minAlnIdentity) continue;
-				result.push_back(aln);
-			}
-		}
+		});
+	}
+	for (size_t i = 0; i < numThreads; i++)
+	{
+		threads[i].join();
+		result.insert(result.end(), resultsPerThread[i].begin(), resultsPerThread[i].end());
 	}
 	std::cerr << result.size() << " induced alignments" << std::endl;
 	return result;
@@ -241,21 +320,29 @@ void set(std::map<T, T>& parent, T key, T target)
 	parent[found] = find(parent, target);
 }
 
-TransitiveClosureMapping getTransitiveClosures(const std::vector<Alignment>& alns)
+TransitiveClosureMapping getTransitiveClosures(const std::vector<Path>& paths, const std::vector<Alignment>& alns)
 {
 	TransitiveClosureMapping result;
-	std::map<std::pair<size_t, size_t>, std::pair<size_t, size_t>> parent;
+	std::map<std::pair<size_t, NodePos>, std::pair<size_t, NodePos>> parent;
+	for (size_t i = 0; i < paths.size(); i++)
+	{
+		for (size_t j = 0; j < paths[i].position.size(); j++)
+		{
+			find(parent, std::pair<size_t, NodePos> { i, NodePos { j, true } });
+			find(parent, std::pair<size_t, NodePos> { i, NodePos { j, false } });
+		}
+	}
 	for (auto aln : alns)
 	{
 		for (auto pair : aln.alignedPairs)
 		{
-			if (pair.first == -1 || pair.second == -1) continue;
-			std::pair<size_t, size_t> leftKey { aln.leftPath, pair.first };
-			std::pair<size_t, size_t> rightKey { aln.rightPath, pair.second };
+			if (pair.leftIndex == -1 || pair.rightIndex == -1) continue;
+			std::pair<size_t, NodePos> leftKey { aln.leftPath, NodePos { pair.leftIndex, pair.leftReverse } };
+			std::pair<size_t, NodePos> rightKey { aln.rightPath, NodePos { pair.rightIndex, pair.rightReverse } };
 			set(parent, leftKey, rightKey);
 		}
 	}
-	std::map<std::pair<size_t, size_t>, size_t> closureNumber;
+	std::map<std::pair<size_t, NodePos>, size_t> closureNumber;
 	size_t nextClosure = 0;
 	for (auto key : parent)
 	{
@@ -272,19 +359,20 @@ TransitiveClosureMapping getTransitiveClosures(const std::vector<Alignment>& aln
 	return result;
 }
 
-GfaGraph getGraph(const TransitiveClosureMapping& transitiveClosures, const std::vector<Path>& paths, const GfaGraph& graph)
+GfaGraph getGraph(const DoublestrandedTransitiveClosureMapping& transitiveClosures, const std::vector<Path>& paths, const GfaGraph& graph)
 {
 	std::unordered_set<size_t> outputtedClosures;
 	GfaGraph result;
 	result.edgeOverlap = graph.edgeOverlap;
 	for (auto pair : transitiveClosures.mapping)
 	{
-		if (outputtedClosures.count(pair.second) == 1) continue;
+		if (outputtedClosures.count(pair.second.id) == 1) continue;
 		NodePos pos = paths[pair.first.first].position[pair.first.second];
 		auto seq = graph.nodes.at(pos.id);
 		if (!pos.end) seq = CommonUtils::ReverseComplement(seq);
-		result.nodes[pair.second] = seq;
-		outputtedClosures.insert(pair.second);
+		if (!pair.second.end) seq = CommonUtils::ReverseComplement(seq);
+		result.nodes[pair.second.id] = seq;
+		outputtedClosures.insert(pair.second.id);
 	}
 	std::cerr << outputtedClosures.size() << " outputted closures" << std::endl;
 	for (size_t i = 0; i < paths.size(); i++)
@@ -296,49 +384,13 @@ GfaGraph getGraph(const TransitiveClosureMapping& transitiveClosures, const std:
 			if (transitiveClosures.mapping.count(previousKey) == 0 || transitiveClosures.mapping.count(currentKey) == 0) continue;
 			assert(transitiveClosures.mapping.count(previousKey) == 1);
 			assert(transitiveClosures.mapping.count(currentKey) == 1);
-			assert(result.nodes.count(transitiveClosures.mapping.at(previousKey)) == 1);
-			assert(result.nodes.count(transitiveClosures.mapping.at(currentKey)) == 1);
-			NodePos from { transitiveClosures.mapping.at(previousKey), true };
-			NodePos to { transitiveClosures.mapping.at(currentKey), true };
-			result.edges[from].push_back(to);
+			assert(result.nodes.count(transitiveClosures.mapping.at(previousKey).id) == 1);
+			assert(result.nodes.count(transitiveClosures.mapping.at(currentKey).id) == 1);
+			auto previousMapping = transitiveClosures.mapping.at(previousKey);
+			auto currentMapping = transitiveClosures.mapping.at(currentKey);
+			result.edges[previousMapping].push_back(currentMapping);
 		}
 	}
-	return result;
-}
-
-TransitiveClosureMapping insertMiddles(const TransitiveClosureMapping& original, const std::vector<Path>& paths)
-{
-	TransitiveClosureMapping result;
-	result = original;
-	size_t nextNum = 0;
-	for (auto pair : original.mapping)
-	{
-		nextNum = std::max(nextNum, pair.second);
-	}
-	nextNum =+ 1;
-	for (size_t i = 0; i < paths.size(); i++)
-	{
-		size_t firstExisting = paths[i].position.size();
-		size_t lastExisting = paths[i].position.size();
-		for (size_t j = 0; j < paths[i].position.size(); j++)
-		{
-			std::pair<size_t, size_t> key { i, j };
-			if (original.mapping.count(key) == 1)
-			{
-				if (firstExisting == paths[i].position.size()) firstExisting = j;
-				lastExisting = j;
-			}
-		}
-		for (size_t j = firstExisting; j < lastExisting; j++)
-		{
-			std::pair<size_t, size_t> key { i, j };
-			if (original.mapping.count(key) == 1) continue;
-			result.mapping[key] = nextNum;
-			nextNum += 1;
-		}
-	}
-	std::cerr << nextNum << " transitive closure sets after inserting middles" << std::endl;
-	std::cerr << result.mapping.size() << " transitive closure items after inserting middles" << std::endl;
 	return result;
 }
 
@@ -356,6 +408,66 @@ std::vector<Path> addNodeLengths(const std::vector<Path>& original, const GfaGra
 	return result;
 }
 
+DoublestrandedTransitiveClosureMapping mergeDoublestrandClosures(const std::vector<Path>& paths, const TransitiveClosureMapping& original)
+{
+	DoublestrandedTransitiveClosureMapping result;
+	std::unordered_map<size_t, NodePos> mapping;
+	int nextId = 0;
+	for (size_t i = 0; i < paths.size(); i++)
+	{
+		for (size_t j = 0; j < paths[i].position.size(); j++)
+		{
+			std::pair<size_t, NodePos> fwKey { i, NodePos { j, true } };
+			std::pair<size_t, NodePos> bwKey { i, NodePos { j, false } };
+			assert(original.mapping.count(fwKey) == 1);
+			assert(original.mapping.count(bwKey) == 1);
+			size_t fwSet = original.mapping.at(fwKey);
+			size_t bwSet = original.mapping.at(bwKey);
+			assert(mapping.count(fwSet) == mapping.count(bwSet));
+			if (mapping.count(fwSet) == 0)
+			{
+				if (fwSet == bwSet)
+				{
+					mapping[fwSet] = NodePos { nextId, true };
+					assert(false);
+				}
+				else
+				{
+					mapping[fwSet] = NodePos { nextId, true };
+					mapping[bwSet] = NodePos { nextId, false };
+				}
+				nextId += 1;
+			}
+			assert(mapping.count(fwSet) == 1);
+			result.mapping[std::pair<size_t, size_t> { i, j }] = mapping.at(fwSet);
+		}
+	}
+	std::cerr << nextId << " doublestranded transitive closure sets" << std::endl;
+	return result;
+}
+
+std::vector<Alignment> doubleAlignments(const std::vector<Alignment>& alns)
+{
+	std::vector<Alignment> result = alns;
+	result.reserve(alns.size() * 2);
+	for (auto aln : alns)
+	{
+		result.emplace_back();
+		result.back().alignmentLength = aln.alignmentLength;
+		result.back().alignmentIdentity = aln.alignmentIdentity;
+		result.back().leftPath = aln.leftPath;
+		result.back().rightPath = aln.rightPath;
+		result.back().alignedPairs = aln.alignedPairs;
+		for (size_t i = 0; i < result.back().alignedPairs.size(); i++)
+		{
+			result.back().alignedPairs[i].leftReverse = !result.back().alignedPairs[i].leftReverse;
+			result.back().alignedPairs[i].rightReverse = !result.back().alignedPairs[i].rightReverse;
+		}
+	}
+	std::cerr << result.size() << " alignments after doubling" << std::endl;
+	return result;
+}
+
 int main(int argc, char** argv)
 {
 	std::string inputGraph { argv[1] };
@@ -365,6 +477,7 @@ int main(int argc, char** argv)
 	size_t minAlnLength = std::stol(argv[5]);
 	double minAlnIdentity = std::stod(argv[6]);
 	std::string outputGraph { argv[7] };
+	int numThreads = std::stoi(argv[8]);
 
 	std::cerr << "load graph" << std::endl;
 	auto graph = GfaGraph::LoadFromFile(inputGraph);
@@ -374,13 +487,15 @@ int main(int argc, char** argv)
 	std::cerr << "add node lengths" << std::endl;
 	paths = addNodeLengths(paths, graph);
 	std::cerr << "induce overlaps" << std::endl;
-	auto alns = induceOverlaps(paths, mismatchPenalty, minAlnLength, minAlnIdentity);
+	auto alns = induceOverlaps(paths, mismatchPenalty, minAlnLength, minAlnIdentity, numThreads);
+	std::cerr << "double alignments" << std::endl;
+	alns = doubleAlignments(alns);
 	std::cerr << "get transitive closure" << std::endl;
-	auto transitiveClosures = getTransitiveClosures(alns);
-	std::cerr << "insert middles" << std::endl;
-	transitiveClosures = insertMiddles(transitiveClosures, paths);
+	auto transitiveClosures = getTransitiveClosures(paths, alns);
+	std::cerr << "merge double strands" << std::endl;
+	auto doubleStrandedClosures = mergeDoublestrandClosures(paths, transitiveClosures);
 	std::cerr << "graphify" << std::endl;
-	auto result = getGraph(transitiveClosures, paths, graph);
+	auto result = getGraph(doubleStrandedClosures, paths, graph);
 	std::cerr << "output" << std::endl;
 	result.SaveToFile(outputGraph);
 }

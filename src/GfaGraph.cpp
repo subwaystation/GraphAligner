@@ -18,6 +18,11 @@ end(end)
 {
 }
 
+bool NodePos::operator<(const NodePos& other) const
+{
+	return id < other.id || (id == other.id && !end && other.end);
+}
+
 bool NodePos::operator==(const NodePos& other) const
 {
 	return id == other.id && end == other.end;
