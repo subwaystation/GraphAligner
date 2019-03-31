@@ -43,6 +43,10 @@ struct Alignment
 	size_t leftPath;
 	size_t rightPath;
 	std::vector<AlignmentMatch> alignedPairs;
+	size_t leftStart;
+	size_t leftEnd;
+	size_t rightStart;
+	size_t rightEnd;
 	size_t alignmentLength;
 	double alignmentIdentity;
 };
@@ -158,12 +162,16 @@ std::vector<Alignment> align(const std::vector<NodePos>& leftPath, const std::ve
 		result.back().leftPath = left;
 		result.back().rightPath = right;
 		result.back().alignmentLength = 0;
+		result.back().leftEnd = maxI-1;
+		result.back().rightEnd = maxJ-1;
 		while (DPtrace[maxI][maxJ] != Start)
 		{
 			assert(maxI > 0);
 			assert(maxJ > 0);
 			size_t leftSize = leftNodeSize[maxI-1];
 			size_t rightSize = rightNodeSize[maxJ-1];
+			result.back().leftStart = maxI-1;
+			result.back().rightStart = maxJ-1;
 			switch(DPtrace[maxI][maxJ])
 			{
 				case Insertion:
@@ -275,6 +283,9 @@ std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mis
 					{
 						if (aln.alignmentLength < minAlnLength) continue;
 						if (aln.alignmentIdentity < minAlnIdentity) continue;
+						aln.rightStart = paths[j].position.size() - 1 - aln.rightStart;
+						aln.rightEnd = paths[j].position.size() - 1 - aln.rightEnd;
+						std::swap(aln.rightStart, aln.rightEnd);
 						for (size_t i = 0; i < aln.alignedPairs.size(); i++)
 						{
 							aln.alignedPairs[i].leftReverse = false;
@@ -468,6 +479,40 @@ std::vector<Alignment> doubleAlignments(const std::vector<Alignment>& alns)
 	return result;
 }
 
+std::vector<Alignment> removeContained(const std::vector<Path>& paths, const std::vector<Alignment>& original)
+{
+	std::vector<std::vector<size_t>> continuousEnd;
+	continuousEnd.resize(paths.size());
+	for (size_t i = 0; i < paths.size(); i++)
+	{
+		continuousEnd[i].resize(paths[i].position.size(), 0);
+	}
+	for (auto aln : original)
+	{
+		assert(aln.leftStart <= aln.leftEnd);
+		assert(aln.rightStart <= aln.rightEnd);
+		for (size_t i = aln.leftStart; i <= aln.leftEnd; i++)
+		{
+			continuousEnd[aln.leftPath][i] = std::max(continuousEnd[aln.leftPath][i], aln.leftEnd);
+		}
+		for (size_t i = aln.rightStart; i <= aln.rightEnd; i++)
+		{
+			continuousEnd[aln.rightPath][i] = std::max(continuousEnd[aln.rightPath][i], aln.rightEnd);
+		}
+	}
+	std::vector<Alignment> result;
+	for (auto aln : original)
+	{
+		if (continuousEnd[aln.leftPath][aln.leftStart] > aln.leftEnd) continue;
+		if (aln.leftStart > 0 && continuousEnd[aln.leftPath][aln.leftStart-1] >= aln.leftEnd) continue;
+		if (continuousEnd[aln.rightPath][aln.rightStart] > aln.rightEnd) continue;
+		if (aln.rightStart > 0 && continuousEnd[aln.rightPath][aln.rightStart-1] >= aln.rightEnd) continue;
+		result.push_back(aln);
+	}
+	std::cerr << result.size() << " alignments after removing contained" << std::endl;
+	return result;
+}
+
 int main(int argc, char** argv)
 {
 	std::string inputGraph { argv[1] };
@@ -488,6 +533,8 @@ int main(int argc, char** argv)
 	paths = addNodeLengths(paths, graph);
 	std::cerr << "induce overlaps" << std::endl;
 	auto alns = induceOverlaps(paths, mismatchPenalty, minAlnLength, minAlnIdentity, numThreads);
+	std::cerr << "remove contained alignments" << std::endl;
+	alns = removeContained(paths, alns);
 	std::cerr << "double alignments" << std::endl;
 	alns = doubleAlignments(alns);
 	std::cerr << "get transitive closure" << std::endl;
