@@ -47,6 +47,7 @@ struct Alignment
 	size_t leftEnd;
 	size_t rightStart;
 	size_t rightEnd;
+	bool rightReverse;
 	size_t alignmentLength;
 	double alignmentIdentity;
 };
@@ -276,6 +277,7 @@ std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mis
 							aln.alignedPairs[i].leftReverse = false;
 							aln.alignedPairs[i].rightReverse = false;
 						}
+						aln.rightReverse = false;
 						resultsPerThread[thread].push_back(aln);
 					}
 					auto bwAlns = align(paths[i].position, reversePaths[j].position, paths[i].nodeSize, reversePaths[j].nodeSize, i, j, mismatchPenalty);
@@ -292,6 +294,7 @@ std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mis
 							aln.alignedPairs[i].rightReverse = true;
 							aln.alignedPairs[i].rightIndex = paths[j].position.size() - 1 - aln.alignedPairs[i].rightIndex;
 						}
+						aln.rightReverse = true;
 						resultsPerThread[thread].push_back(aln);
 					}
 				}
@@ -717,6 +720,29 @@ std::vector<Alignment> removeHighCoverageAlignments(const std::vector<Path>& pat
 	return result;
 }
 
+std::vector<Alignment> removeNonDovetails(const std::vector<Path>& paths, const std::vector<Alignment>& alns)
+{
+	std::vector<Alignment> result;
+	for (auto aln : alns)
+	{
+		if (aln.leftStart == 0) continue;
+		if (aln.leftEnd != paths[aln.leftPath].position.size()-1) continue;
+		if (aln.rightReverse)
+		{
+			if (aln.rightStart == 0) continue;
+			if (aln.rightEnd != paths[aln.rightPath].position.size()-1) continue;
+		}
+		else
+		{
+			if (aln.rightStart != 0) continue;
+			if (aln.rightEnd == paths[aln.rightPath].position.size()-1) continue;
+		}
+		result.push_back(aln);
+	}
+	std::cerr << result.size() << " alignments after removing non-dovetails" << std::endl;
+	return result;
+}
+
 int main(int argc, char** argv)
 {
 	std::string inputGraph { argv[1] };
@@ -741,14 +767,16 @@ int main(int argc, char** argv)
 	paths = filterByLength(paths, 1000);
 	std::cerr << "induce overlaps" << std::endl;
 	auto alns = induceOverlaps(paths, mismatchPenalty, minAlnLength, minAlnIdentity, numThreads);
+	std::cerr << "remove non-dovetail alignments" << std::endl;
+	alns = removeNonDovetails(paths, alns);
 	// std::cerr << "pick longest alignments" << std::endl;
-	// alns = pickLongestPerRead(paths, alns, 5);
+	// alns = pickLongestPerRead(paths, alns, 3);
 	// std::cerr << "remove contained alignments" << std::endl;
 	// alns = removeContained(paths, alns);
 	std::cerr << "double alignments" << std::endl;
 	alns = doubleAlignments(alns);
-	std::cerr << "remove high coverage alignments" << std::endl;
-	alns = removeHighCoverageAlignments(paths, alns, 15);
+	// std::cerr << "remove high coverage alignments" << std::endl;
+	// alns = removeHighCoverageAlignments(paths, alns, 15);
 	std::cerr << "pick lowest error alignments" << std::endl;
 	alns = pickLowestErrorPerRead(paths, alns, 3);
 	std::cerr << "double alignments" << std::endl;
