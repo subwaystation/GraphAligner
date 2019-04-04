@@ -155,16 +155,16 @@ std::vector<Alignment> align(const std::vector<NodePos>& leftPath, const std::ve
 				DPscores[i+1][j+1] = DPscores[i+1][j] - deletionCost;
 				DPtrace[i+1][j+1] = Deletion;
 			}
-			if (match && DPscores[i][j] + matchScore > DPscores[i][j])
+			if (match && DPscores[i][j] + matchScore >= DPscores[i+1][j+1])
 			{
 				DPscores[i+1][j+1] = DPscores[i][j] + matchScore;
 				DPtrace[i+1][j+1] = Match;
 				maxima.erase(std::make_pair(i, j));
 				maxima.emplace(i+1, j+1);
 			}
-			if (!match && DPscores[i][j] + mismatchCost > DPscores[i][j])
+			if (!match && DPscores[i][j] - mismatchCost >= DPscores[i+1][j+1])
 			{
-				DPscores[i+1][j+1] = DPscores[i][j] + mismatchCost;
+				DPscores[i+1][j+1] = DPscores[i][j] - mismatchCost;
 				DPtrace[i+1][j+1] = Mismatch;
 			}
 		}
@@ -804,6 +804,55 @@ ClosureEdges removeChimericEdges(const DoublestrandedTransitiveClosureMapping& c
 	return result;
 }
 
+std::pair<DoublestrandedTransitiveClosureMapping, ClosureEdges> bridgeTips(const DoublestrandedTransitiveClosureMapping& closures, const ClosureEdges& edges, const std::vector<Path>& paths, size_t minCoverage)
+{
+	std::unordered_set<NodePos> isNotTip;
+	for (auto pair : edges.coverage)
+	{
+		isNotTip.insert(pair.first.first);
+		isNotTip.insert(pair.first.second.Reverse());
+	}
+	std::unordered_map<std::pair<NodePos, NodePos>, std::vector<std::tuple<size_t, size_t, size_t>>> pathsSupportingEdge;
+	for (size_t i = 0; i < paths.size(); i++)
+	{
+		std::vector<size_t> gapStarts;
+		for (size_t j = 1; j < paths[i].position.size(); j++)
+		{
+			auto currentKey = std::make_pair(i, j);
+			auto previousKey = std::make_pair(i, j);
+			if (closures.mapping.count(previousKey) == 1 && isNotTip.count(closures.mapping.at(previousKey)) == 0)
+			{
+				gapStarts.push_back(j-1);
+			}
+			if (closures.mapping.count(currentKey) == 1 && isNotTip.count(closures.mapping.at(currentKey).Reverse()) == 0)
+			{
+				auto endPos = closures.mapping.at(currentKey);
+				for (auto start : gapStarts)
+				{
+					auto startPos = closures.mapping.at(std::make_pair(i, start));
+					pathsSupportingEdge[canon(startPos, endPos)].emplace_back(i, start, j);
+				}
+			}
+		}
+	}
+	DoublestrandedTransitiveClosureMapping resultClosures = closures;
+	ClosureEdges resultEdges = edges;
+	for (auto pair : pathsSupportingEdge)
+	{
+		std::set<size_t> readsSupportingPath;
+		for (auto t : pair.second)
+		{
+			readsSupportingPath.insert(std::get<0>(t));
+		}
+		if (readsSupportingPath.size() >= minCoverage)
+		{
+			resultEdges.coverage[pair.first] = readsSupportingPath.size();
+		}
+	}
+	std::cerr << resultEdges.coverage.size() << " edges after bridging tips" << std::endl;
+	return std::make_pair(resultClosures, resultEdges);
+}
+
 int main(int argc, char** argv)
 {
 	std::string inputGraph { argv[1] };
@@ -823,12 +872,12 @@ int main(int argc, char** argv)
 	auto paths = loadAlignmentsAsPaths(inputAlns);
 	std::cerr << "add node lengths" << std::endl;
 	paths = addNodeLengths(paths, graph);
-	// std::cerr << "filter paths on length" << std::endl;
-	// paths = filterByLength(paths, 1000);
+	std::cerr << "filter paths on length" << std::endl;
+	paths = filterByLength(paths, 1000);
 	std::cerr << "induce overlaps" << std::endl;
 	auto alns = induceOverlaps(paths, mismatchPenalty, minAlnLength, minAlnIdentity, numThreads);
-	// std::cerr << "remove non-dovetail alignments" << std::endl;
-	// alns = removeNonDovetails(paths, alns);
+	std::cerr << "remove non-dovetail alignments" << std::endl;
+	alns = removeNonDovetails(paths, alns);
 	std::cerr << "pick longest alignments" << std::endl;
 	alns = pickLongestPerRead(paths, alns, maxAlnCount);
 	// std::cerr << "double alignments" << std::endl;
@@ -851,10 +900,12 @@ int main(int argc, char** argv)
 	auto closureEdges = getClosureEdges(doubleStrandedClosures, paths);
 	std::cerr << "remove wrong coverage closures" << std::endl;
 	doubleStrandedClosures = removeOutsideCoverageClosures(doubleStrandedClosures, 3, 10000);
-	std::cerr << "insert middles" << std::endl;
-	doubleStrandedClosures = insertMiddles(doubleStrandedClosures, paths);
+	// std::cerr << "insert middles" << std::endl;
+	// doubleStrandedClosures = insertMiddles(doubleStrandedClosures, paths);
 	std::cerr << "remove chimeric edges" << std::endl;
 	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 3, 10);
+	// std::cerr << "bridge tips" << std::endl;
+	// std::tie(doubleStrandedClosures, closureEdges) = bridgeTips(doubleStrandedClosures, closureEdges, paths, 2);
 	std::cerr << "graphify" << std::endl;
 	auto result = getGraph(doubleStrandedClosures, closureEdges, paths, graph);
 	std::cerr << "output" << std::endl;
