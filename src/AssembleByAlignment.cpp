@@ -57,6 +57,23 @@ struct TransitiveClosureMapping
 	std::map<std::pair<size_t, NodePos>, size_t> mapping;
 };
 
+std::pair<NodePos, NodePos> canon(NodePos left, NodePos right)
+{
+	if (left.id == right.id)
+	{
+		if (!left.end && !right.end) return std::make_pair(right.Reverse(), left.Reverse());
+		return std::make_pair(left, right);
+	}
+	if (left < right) return std::make_pair(left, right);
+	assert(right.Reverse() < left.Reverse());
+	return std::make_pair(right.Reverse(), left.Reverse());
+}
+
+struct ClosureEdges
+{
+	std::map<std::pair<NodePos, NodePos>, size_t> coverage;
+};
+
 struct DoublestrandedTransitiveClosureMapping
 {
 	std::map<std::pair<size_t, size_t>, NodePos> mapping;
@@ -372,8 +389,13 @@ TransitiveClosureMapping getTransitiveClosures(const std::vector<Path>& paths, c
 	return result;
 }
 
-GfaGraph getGraph(const DoublestrandedTransitiveClosureMapping& transitiveClosures, const std::vector<Path>& paths, const GfaGraph& graph)
+GfaGraph getGraph(const DoublestrandedTransitiveClosureMapping& transitiveClosures, const ClosureEdges& edges, const std::vector<Path>& paths, const GfaGraph& graph)
 {
+	std::unordered_map<size_t, size_t> closureCoverage;
+	for (auto pair : transitiveClosures.mapping)
+	{
+		closureCoverage[pair.second.id] += 1;
+	}
 	std::unordered_set<size_t> outputtedClosures;
 	GfaGraph result;
 	result.edgeOverlap = graph.edgeOverlap;
@@ -385,25 +407,15 @@ GfaGraph getGraph(const DoublestrandedTransitiveClosureMapping& transitiveClosur
 		if (!pos.end) seq = CommonUtils::ReverseComplement(seq);
 		if (!pair.second.end) seq = CommonUtils::ReverseComplement(seq);
 		result.nodes[pair.second.id] = seq;
+		result.tags[pair.second.id] = "LN:i:" + std::to_string(seq.size() - graph.edgeOverlap) + "\tKC:i:" + std::to_string((seq.size() - graph.edgeOverlap) * closureCoverage[pair.second.id]) + "\tkm:f:" + std::to_string(closureCoverage[pair.second.id]);
 		outputtedClosures.insert(pair.second.id);
 	}
 	std::cerr << outputtedClosures.size() << " outputted closures" << std::endl;
-	for (size_t i = 0; i < paths.size(); i++)
+	for (auto pair : edges.coverage)
 	{
-		for (size_t j = 1; j < paths[i].position.size(); j++)
-		{
-			std::pair<size_t, size_t> previousKey { i, j-1 };
-			std::pair<size_t, size_t> currentKey { i, j };
-			if (transitiveClosures.mapping.count(previousKey) == 0 || transitiveClosures.mapping.count(currentKey) == 0) continue;
-			assert(transitiveClosures.mapping.count(previousKey) == 1);
-			assert(transitiveClosures.mapping.count(currentKey) == 1);
-			assert(result.nodes.count(transitiveClosures.mapping.at(previousKey).id) == 1);
-			assert(result.nodes.count(transitiveClosures.mapping.at(currentKey).id) == 1);
-			auto previousMapping = transitiveClosures.mapping.at(previousKey);
-			auto currentMapping = transitiveClosures.mapping.at(currentKey);
-			result.edges[previousMapping].push_back(currentMapping);
-		}
+		result.edges[pair.first.first].push_back(pair.first.second);
 	}
+	std::cerr << edges.coverage.size() << " outputted edges" << std::endl;
 	return result;
 }
 
@@ -546,28 +558,39 @@ std::vector<Alignment> pickLowestErrorPerRead(const std::vector<Path>& paths, co
 
 std::vector<Alignment> pickLongestPerRead(const std::vector<Path>& paths, const std::vector<Alignment>& alns, size_t maxNum)
 {
-	std::vector<std::vector<Alignment>> alnsPerRead;
+	std::vector<std::vector<size_t>> alnsPerRead;
+	std::vector<bool> picked;
+	picked.resize(alns.size(), false);
 	alnsPerRead.resize(paths.size());
-	for (auto aln : alns)
+	for (size_t i = 0; i < alns.size(); i++)
 	{
-		alnsPerRead[aln.leftPath].push_back(aln);
-		alnsPerRead[aln.rightPath].push_back(aln);
+		alnsPerRead[alns[i].leftPath].push_back(i);
+		alnsPerRead[alns[i].rightPath].push_back(i);
 	}
-	std::vector<Alignment> result;
 	for (size_t i = 0; i < alnsPerRead.size(); i++)
 	{
 		if (alnsPerRead[i].size() > maxNum)
 		{
-			std::sort(alnsPerRead[i].begin(), alnsPerRead[i].end(), [](const Alignment& left, const Alignment& right){ return left.alignmentLength < right.alignmentLength; });
+			std::sort(alnsPerRead[i].begin(), alnsPerRead[i].end(), [&alns](size_t left, size_t right){ return alns[left].alignmentLength * alns[left].alignmentIdentity < alns[right].alignmentLength * alns[right].alignmentIdentity; });
+			// std::sort(alnsPerRead[i].begin(), alnsPerRead[i].end(), [](const Alignment& left, const Alignment& right){ return left.alignmentIdentity < right.alignmentIdentity; });
+			// std::stable_sort(alnsPerRead[i].begin(), alnsPerRead[i].end(), [](const Alignment& left, const Alignment& right){ return left.alignmentLength < right.alignmentLength; });
 			for (size_t j = alnsPerRead[i].size() - maxNum; j < alnsPerRead[i].size(); j++)
 			{
-				result.push_back(alnsPerRead[i][j]);
+				picked[alnsPerRead[i][j]] = true;
 			}
 		}
 		else
 		{
-			result.insert(result.end(), alnsPerRead[i].begin(), alnsPerRead[i].end());
+			for (auto aln : alnsPerRead[i])
+			{
+				picked[aln] = true;
+			}
 		}
+	}
+	std::vector<Alignment> result;
+	for (size_t i = 0; i < alns.size(); i++)
+	{
+		if (picked[i]) result.push_back(alns[i]);
 	}
 	std::cerr << result.size() << " alignments after picking longest" << std::endl;
 	return result;
@@ -589,7 +612,7 @@ std::vector<Path> filterByLength(const std::vector<Path>& paths, size_t minLen)
 	return result;
 }
 
-DoublestrandedTransitiveClosureMapping removeLowCoverageClosures(const DoublestrandedTransitiveClosureMapping& closures, int minCoverage)
+DoublestrandedTransitiveClosureMapping removeOutsideCoverageClosures(const DoublestrandedTransitiveClosureMapping& closures, int minCoverage, int maxCoverage)
 {
 	std::unordered_map<size_t, size_t> coverage;
 	for (auto pair : closures.mapping)
@@ -599,7 +622,7 @@ DoublestrandedTransitiveClosureMapping removeLowCoverageClosures(const Doublestr
 	DoublestrandedTransitiveClosureMapping result;
 	for (auto pair : closures.mapping)
 	{
-		if (coverage[pair.second.id] >= minCoverage)
+		if (coverage[pair.second.id] >= minCoverage && coverage[pair.second.id] <= maxCoverage)
 		{
 			result.mapping[pair.first] = pair.second;
 		}
@@ -743,6 +766,44 @@ std::vector<Alignment> removeNonDovetails(const std::vector<Path>& paths, const 
 	return result;
 }
 
+ClosureEdges getClosureEdges(const DoublestrandedTransitiveClosureMapping& closures, const std::vector<Path>& paths)
+{
+	ClosureEdges result;
+	for (size_t i = 0; i < paths.size(); i++)
+	{
+		for (size_t j = 1; j < paths[i].position.size(); j++)
+		{
+			NodePos oldPos = closures.mapping.at(std::make_pair(i, j-1));
+			NodePos newPos = closures.mapping.at(std::make_pair(i, j));
+			result.coverage[canon(oldPos, newPos)] += 1;
+		}
+	}
+	std::cerr << result.coverage.size() << " edges" << std::endl;
+	return result;
+}
+
+ClosureEdges removeChimericEdges(const DoublestrandedTransitiveClosureMapping& closures, const ClosureEdges& edges, size_t maxRemovableCoverage, size_t minSafeCoverage)
+{
+	std::unordered_map<NodePos, size_t> maxOutEdgeCoverage;
+	for (auto edge : edges.coverage)
+	{
+		maxOutEdgeCoverage[edge.first.first] = std::max(maxOutEdgeCoverage[edge.first.first], edge.second);
+		maxOutEdgeCoverage[edge.first.second.Reverse()] = std::max(maxOutEdgeCoverage[edge.first.second.Reverse()], edge.second);
+	}
+	ClosureEdges result;
+	for (auto edge : edges.coverage)
+	{
+		if (edge.second <= maxRemovableCoverage)
+		{
+			if (maxOutEdgeCoverage[edge.first.first] >= minSafeCoverage) continue;
+			if (maxOutEdgeCoverage[edge.first.second.Reverse()] >= minSafeCoverage) continue;
+		}
+		result.coverage[edge.first] = edge.second;
+	}
+	std::cerr << result.coverage.size() << " edges after chimeric removal" << std::endl;
+	return result;
+}
+
 int main(int argc, char** argv)
 {
 	std::string inputGraph { argv[1] };
@@ -753,44 +814,49 @@ int main(int argc, char** argv)
 	double minAlnIdentity = std::stod(argv[6]);
 	std::string outputGraph { argv[7] };
 	int numThreads = std::stoi(argv[8]);
-
-	std::cerr << minAlnIdentity << std::endl;
+	int maxAlnCount = std::stoi(argv[9]);
 
 	std::cerr << "load graph" << std::endl;
 	auto graph = GfaGraph::LoadFromFile(inputGraph);
 	graph.confirmDoublesidedEdges();
-	std::cerr << "load alignments" << std::endl;
+	std::cerr << "load paths" << std::endl;
 	auto paths = loadAlignmentsAsPaths(inputAlns);
 	std::cerr << "add node lengths" << std::endl;
 	paths = addNodeLengths(paths, graph);
-	std::cerr << "filter alignments on length" << std::endl;
-	paths = filterByLength(paths, 1000);
+	// std::cerr << "filter paths on length" << std::endl;
+	// paths = filterByLength(paths, 1000);
 	std::cerr << "induce overlaps" << std::endl;
 	auto alns = induceOverlaps(paths, mismatchPenalty, minAlnLength, minAlnIdentity, numThreads);
-	std::cerr << "remove non-dovetail alignments" << std::endl;
-	alns = removeNonDovetails(paths, alns);
-	// std::cerr << "pick longest alignments" << std::endl;
-	// alns = pickLongestPerRead(paths, alns, 3);
+	// std::cerr << "remove non-dovetail alignments" << std::endl;
+	// alns = removeNonDovetails(paths, alns);
+	std::cerr << "pick longest alignments" << std::endl;
+	alns = pickLongestPerRead(paths, alns, maxAlnCount);
+	// std::cerr << "double alignments" << std::endl;
+	// alns = doubleAlignments(alns);
 	// std::cerr << "remove contained alignments" << std::endl;
 	// alns = removeContained(paths, alns);
-	std::cerr << "double alignments" << std::endl;
-	alns = doubleAlignments(alns);
+	// std::cerr << "double alignments" << std::endl;
+	// alns = doubleAlignments(alns);
 	// std::cerr << "remove high coverage alignments" << std::endl;
-	// alns = removeHighCoverageAlignments(paths, alns, 15);
-	std::cerr << "pick lowest error alignments" << std::endl;
-	alns = pickLowestErrorPerRead(paths, alns, 3);
+	// alns = removeHighCoverageAlignments(paths, alns, 40);
+	// std::cerr << "pick lowest error alignments" << std::endl;
+	// alns = pickLowestErrorPerRead(paths, alns, 3);
 	std::cerr << "double alignments" << std::endl;
 	alns = doubleAlignments(alns);
 	std::cerr << "get transitive closure" << std::endl;
 	auto transitiveClosures = getTransitiveClosures(paths, alns);
 	std::cerr << "merge double strands" << std::endl;
 	auto doubleStrandedClosures = mergeDoublestrandClosures(paths, transitiveClosures);
-	std::cerr << "remove low coverage closures" << std::endl;
-	doubleStrandedClosures = removeLowCoverageClosures(doubleStrandedClosures, 5);
+	std::cerr << "get closure edges" << std::endl;
+	auto closureEdges = getClosureEdges(doubleStrandedClosures, paths);
+	std::cerr << "remove wrong coverage closures" << std::endl;
+	doubleStrandedClosures = removeOutsideCoverageClosures(doubleStrandedClosures, 3, 10000);
 	std::cerr << "insert middles" << std::endl;
 	doubleStrandedClosures = insertMiddles(doubleStrandedClosures, paths);
+	std::cerr << "remove chimeric edges" << std::endl;
+	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 3, 10);
 	std::cerr << "graphify" << std::endl;
-	auto result = getGraph(doubleStrandedClosures, paths, graph);
+	auto result = getGraph(doubleStrandedClosures, closureEdges, paths, graph);
 	std::cerr << "output" << std::endl;
 	result.SaveToFile(outputGraph);
 }
