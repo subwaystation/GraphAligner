@@ -120,21 +120,27 @@ std::vector<Alignment> align(const std::vector<NodePos>& leftPath, const std::ve
 	};
 	static thread_local std::vector<std::vector<double>> DPscores;
 	static thread_local std::vector<std::vector<BacktraceType>> DPtrace;
+	static thread_local std::vector<std::vector<size_t>> matches;
 	if (DPscores.size() < leftPath.size()+1) DPscores.resize(leftPath.size()+1);
 	if (DPtrace.size() < leftPath.size()+1) DPtrace.resize(leftPath.size()+1);
+	if (matches.size() < leftPath.size()+1) matches.resize(leftPath.size()+1);
 	if (DPscores.back().size() < rightPath.size()+1)
 	{
 		for (size_t i = 0; i < DPscores.size(); i++)
 		{
 			DPscores[i].resize(rightPath.size()+1, 0);
 			DPtrace[i].resize(rightPath.size()+1, Start);
+			matches[i].resize(rightPath.size()+1, 0);
 		}
 	}
-	std::set<std::pair<size_t, size_t>> maxima;
+	// std::set<std::pair<size_t, size_t>> maxima;
+	size_t maxI = 0;
+	size_t maxJ = 0;
 	for (size_t i = 0; i < leftPath.size(); i++)
 	{
 		for (size_t j = 0; j < rightPath.size(); j++)
 		{
+			matches[i+1][j+1] = 0;
 			DPscores[i+1][j+1] = 0;
 			DPtrace[i+1][j+1] = Start;
 			bool match = (leftPath[i] == rightPath[j]);
@@ -145,37 +151,47 @@ std::vector<Alignment> align(const std::vector<NodePos>& leftPath, const std::ve
 			double mismatchCost = std::max(insertionCost, deletionCost);
 			double matchScore = leftSize;
 			assert(!match || leftSize == rightSize);
-			if (DPscores[i][j+1] - insertionCost > DPscores[i+1][j+1])
-			{
+			// if (DPscores[i][j+1] - insertionCost > DPscores[i+1][j+1])
+			// {
 				DPscores[i+1][j+1] = DPscores[i][j+1] - insertionCost;
 				DPtrace[i+1][j+1] = Insertion;
-			}
+				matches[i+1][j+1] = matches[i][j+1];
+			// }
 			if (DPscores[i+1][j] - deletionCost > DPscores[i+1][j+1])
 			{
 				DPscores[i+1][j+1] = DPscores[i+1][j] - deletionCost;
 				DPtrace[i+1][j+1] = Deletion;
+				matches[i+1][j+1] = matches[i+1][j];
 			}
 			if (match && DPscores[i][j] + matchScore >= DPscores[i+1][j+1])
 			{
 				DPscores[i+1][j+1] = DPscores[i][j] + matchScore;
 				DPtrace[i+1][j+1] = Match;
-				maxima.erase(std::make_pair(i, j));
-				maxima.emplace(i+1, j+1);
+				// maxima.erase(std::make_pair(i, j));
+				// maxima.emplace(i+1, j+1);
+				matches[i+1][j+1] = matches[i][j] + matchScore;
 			}
 			if (!match && DPscores[i][j] - mismatchCost >= DPscores[i+1][j+1])
 			{
 				DPscores[i+1][j+1] = DPscores[i][j] - mismatchCost;
 				DPtrace[i+1][j+1] = Mismatch;
+				matches[i+1][j+1] = matches[i][j];
+			}
+			if ((i == leftPath.size()-1 || j == rightPath.size()) && matches[i+1][j+1] >= matches[maxI][maxJ])
+			{
+				maxI = i+1;
+				maxJ = j+1;
 			}
 		}
 	}
+	std::vector<Alignment> result;
+	if (maxI == 0 && maxJ == 0) return result;
 	size_t matchLen = 0;
 	size_t mismatchLen = 0;
-	std::vector<Alignment> result;
-	for (auto maximum : maxima)
-	{
-		size_t maxI = maximum.first;
-		size_t maxJ = maximum.second;
+	// for (auto maximum : maxima)
+	// {
+	// 	size_t maxI = maximum.first;
+	// 	size_t maxJ = maximum.second;
 		result.emplace_back();
 		result.back().leftPath = left;
 		result.back().rightPath = right;
@@ -228,7 +244,7 @@ std::vector<Alignment> align(const std::vector<NodePos>& leftPath, const std::ve
 		{
 			result.back().alignmentIdentity = (double)matchLen / ((double)matchLen + (double)mismatchLen);
 		}
-	}
+	// }
 	return result;
 }
 
@@ -413,6 +429,7 @@ GfaGraph getGraph(const DoublestrandedTransitiveClosureMapping& transitiveClosur
 	std::cerr << outputtedClosures.size() << " outputted closures" << std::endl;
 	for (auto pair : edges.coverage)
 	{
+		if (outputtedClosures.count(pair.first.first.id) == 0 || outputtedClosures.count(pair.first.second.id) == 0) continue;
 		result.edges[pair.first.first].push_back(pair.first.second);
 	}
 	std::cerr << edges.coverage.size() << " outputted edges" << std::endl;
@@ -558,39 +575,43 @@ std::vector<Alignment> pickLowestErrorPerRead(const std::vector<Path>& paths, co
 
 std::vector<Alignment> pickLongestPerRead(const std::vector<Path>& paths, const std::vector<Alignment>& alns, size_t maxNum)
 {
-	std::vector<std::vector<size_t>> alnsPerRead;
-	std::vector<bool> picked;
-	picked.resize(alns.size(), false);
-	alnsPerRead.resize(paths.size());
+	std::vector<std::vector<size_t>> leftAlnsPerRead;
+	std::vector<std::vector<size_t>> rightAlnsPerRead;
+	std::vector<int> picked;
+	picked.resize(alns.size(), 0);
+	leftAlnsPerRead.resize(paths.size());
+	rightAlnsPerRead.resize(paths.size());
 	for (size_t i = 0; i < alns.size(); i++)
 	{
-		alnsPerRead[alns[i].leftPath].push_back(i);
-		alnsPerRead[alns[i].rightPath].push_back(i);
+		if (alns[i].leftStart == 0) leftAlnsPerRead[alns[i].leftPath].push_back(i);
+		if (alns[i].leftEnd == paths[alns[i].leftPath].position.size()-1) rightAlnsPerRead[alns[i].leftPath].push_back(i);
+		if (alns[i].rightStart == 0) leftAlnsPerRead[alns[i].rightPath].push_back(i);
+		if (alns[i].rightEnd == paths[alns[i].rightPath].position.size()-1) rightAlnsPerRead[alns[i].rightPath].push_back(i);
 	}
-	for (size_t i = 0; i < alnsPerRead.size(); i++)
+	for (size_t i = 0; i < leftAlnsPerRead.size(); i++)
 	{
-		if (alnsPerRead[i].size() > maxNum)
+		std::sort(leftAlnsPerRead[i].begin(), leftAlnsPerRead[i].end(), [&alns](size_t left, size_t right){ return alns[left].alignmentLength * alns[left].alignmentIdentity < alns[right].alignmentLength * alns[right].alignmentIdentity; });
+		std::sort(rightAlnsPerRead[i].begin(), rightAlnsPerRead[i].end(), [&alns](size_t left, size_t right){ return alns[left].alignmentLength * alns[left].alignmentIdentity < alns[right].alignmentLength * alns[right].alignmentIdentity; });
+		std::set<size_t> pickedHere;
+		for (size_t j = leftAlnsPerRead[i].size() > maxNum ? (leftAlnsPerRead[i].size() - maxNum) : 0; j < leftAlnsPerRead[i].size(); j++)
 		{
-			std::sort(alnsPerRead[i].begin(), alnsPerRead[i].end(), [&alns](size_t left, size_t right){ return alns[left].alignmentLength * alns[left].alignmentIdentity < alns[right].alignmentLength * alns[right].alignmentIdentity; });
-			// std::sort(alnsPerRead[i].begin(), alnsPerRead[i].end(), [](const Alignment& left, const Alignment& right){ return left.alignmentIdentity < right.alignmentIdentity; });
-			// std::stable_sort(alnsPerRead[i].begin(), alnsPerRead[i].end(), [](const Alignment& left, const Alignment& right){ return left.alignmentLength < right.alignmentLength; });
-			for (size_t j = alnsPerRead[i].size() - maxNum; j < alnsPerRead[i].size(); j++)
-			{
-				picked[alnsPerRead[i][j]] = true;
-			}
+			pickedHere.insert(leftAlnsPerRead[i][j]);
 		}
-		else
+		for (size_t j = rightAlnsPerRead[i].size() > maxNum ? (rightAlnsPerRead[i].size() - maxNum) : 0; j < rightAlnsPerRead[i].size(); j++)
 		{
-			for (auto aln : alnsPerRead[i])
-			{
-				picked[aln] = true;
-			}
+			pickedHere.insert(rightAlnsPerRead[i][j]);
+		}
+		for (auto index : pickedHere)
+		{
+			picked[index] += 1;
 		}
 	}
 	std::vector<Alignment> result;
 	for (size_t i = 0; i < alns.size(); i++)
 	{
-		if (picked[i]) result.push_back(alns[i]);
+		assert(picked[i] >= 0);
+		assert(picked[i] <= 2);
+		if (picked[i] == 2) result.push_back(alns[i]);
 	}
 	std::cerr << result.size() << " alignments after picking longest" << std::endl;
 	return result;
@@ -876,8 +897,8 @@ int main(int argc, char** argv)
 	paths = filterByLength(paths, 1000);
 	std::cerr << "induce overlaps" << std::endl;
 	auto alns = induceOverlaps(paths, mismatchPenalty, minAlnLength, minAlnIdentity, numThreads);
-	std::cerr << "remove non-dovetail alignments" << std::endl;
-	alns = removeNonDovetails(paths, alns);
+	// std::cerr << "remove non-dovetail alignments" << std::endl;
+	// alns = removeNonDovetails(paths, alns);
 	std::cerr << "pick longest alignments" << std::endl;
 	alns = pickLongestPerRead(paths, alns, maxAlnCount);
 	// std::cerr << "double alignments" << std::endl;
