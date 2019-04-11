@@ -177,7 +177,7 @@ std::vector<Alignment> align(const std::vector<NodePos>& leftPath, const std::ve
 				DPtrace[i+1][j+1] = Mismatch;
 				matches[i+1][j+1] = matches[i][j];
 			}
-			if ((i == leftPath.size()-1 || j == rightPath.size()) && matches[i+1][j+1] >= matches[maxI][maxJ])
+			if ((i == leftPath.size()-1 || j == rightPath.size() - 1) && DPscores[i+1][j+1] >= DPscores[maxI][maxJ])
 			{
 				maxI = i+1;
 				maxJ = j+1;
@@ -423,7 +423,7 @@ GfaGraph getGraph(const DoublestrandedTransitiveClosureMapping& transitiveClosur
 		if (!pos.end) seq = CommonUtils::ReverseComplement(seq);
 		if (!pair.second.end) seq = CommonUtils::ReverseComplement(seq);
 		result.nodes[pair.second.id] = seq;
-		result.tags[pair.second.id] = "LN:i:" + std::to_string(seq.size() - graph.edgeOverlap) + "\tKC:i:" + std::to_string((seq.size() - graph.edgeOverlap) * closureCoverage[pair.second.id]) + "\tkm:f:" + std::to_string(closureCoverage[pair.second.id]);
+		result.tags[pair.second.id] = "LN:i:" + std::to_string(seq.size() - graph.edgeOverlap) + "\tKC:i:" + std::to_string((seq.size() - graph.edgeOverlap) * closureCoverage[pair.second.id]) + "\tkm:f:" + std::to_string(closureCoverage[pair.second.id]) + "\toi:Z:" + std::to_string(pos.id) + (pos.end ? "+" : "-");
 		outputtedClosures.insert(pair.second.id);
 	}
 	std::cerr << outputtedClosures.size() << " outputted closures" << std::endl;
@@ -840,7 +840,7 @@ std::pair<DoublestrandedTransitiveClosureMapping, ClosureEdges> bridgeTips(const
 		for (size_t j = 1; j < paths[i].position.size(); j++)
 		{
 			auto currentKey = std::make_pair(i, j);
-			auto previousKey = std::make_pair(i, j);
+			auto previousKey = std::make_pair(i, j-1);
 			if (closures.mapping.count(previousKey) == 1 && isNotTip.count(closures.mapping.at(previousKey)) == 0)
 			{
 				gapStarts.push_back(j-1);
@@ -921,12 +921,15 @@ int main(int argc, char** argv)
 	auto closureEdges = getClosureEdges(doubleStrandedClosures, paths);
 	std::cerr << "remove wrong coverage closures" << std::endl;
 	doubleStrandedClosures = removeOutsideCoverageClosures(doubleStrandedClosures, 3, 10000);
+	std::cerr << "bridge tips" << std::endl;
+	std::tie(doubleStrandedClosures, closureEdges) = bridgeTips(doubleStrandedClosures, closureEdges, paths, 2);
 	// std::cerr << "insert middles" << std::endl;
 	// doubleStrandedClosures = insertMiddles(doubleStrandedClosures, paths);
 	std::cerr << "remove chimeric edges" << std::endl;
+	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 1, 3);
+	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 2, 8);
 	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 3, 10);
-	// std::cerr << "bridge tips" << std::endl;
-	// std::tie(doubleStrandedClosures, closureEdges) = bridgeTips(doubleStrandedClosures, closureEdges, paths, 2);
+	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 5, 20);
 	std::cerr << "graphify" << std::endl;
 	auto result = getGraph(doubleStrandedClosures, closureEdges, paths, graph);
 	std::cerr << "output" << std::endl;
