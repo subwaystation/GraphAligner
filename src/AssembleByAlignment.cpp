@@ -17,6 +17,8 @@ struct Path
 {
 	std::vector<NodePos> position;
 	std::vector<size_t> nodeSize;
+	std::vector<size_t> cumulativePrefixLength;
+	std::unordered_map<NodePos, std::vector<size_t>> occurrences;
 	Path Reverse() const
 	{
 		Path result = *this;
@@ -26,7 +28,25 @@ struct Path
 		{
 			result.position[i] = result.position[i].Reverse();
 		}
+		result.calculateOccurrences();
+		result.calculateCumulativePrefixLength();
 		return result;
+	}
+	void calculateCumulativePrefixLength()
+	{
+		cumulativePrefixLength.resize(nodeSize.size()+1, 0);
+		for (size_t i = 1; i < cumulativePrefixLength.size(); i++)
+		{
+			cumulativePrefixLength[i] = cumulativePrefixLength[i-1] + nodeSize[i-1];
+		}
+	}
+	void calculateOccurrences()
+	{
+		occurrences.clear();
+		for (size_t i = 0; i < position.size(); i++)
+		{
+			occurrences[position[i]].push_back(i);
+		}
 	}
 };
 
@@ -103,13 +123,127 @@ std::vector<Path> loadAlignmentsAsPaths(std::string fileName)
 				result.back().position.emplace_back(aln.path().mapping(i).position().node_id(), !aln.path().mapping(i).position().is_reverse());
 			}
 		}
-		if (result.back().position.size() == 0) result.pop_back();
+		if (result.back().position.size() == 0)
+		{
+			result.pop_back();
+			continue;
+		}
+		result.back().calculateOccurrences();
 	}
 	std::cerr << result.size() << " paths" << std::endl;
 	return result;
 }
 
-std::vector<Alignment> align(const std::vector<NodePos>& leftPath, const std::vector<NodePos>& rightPath, const std::vector<size_t>& leftNodeSize, const std::vector<size_t>& rightNodeSize, size_t left, size_t right, double mismatchPenalty)
+Alignment alignSparse(const Path& leftPath, const Path& rightPath, size_t left, size_t right, double mismatchPenalty)
+{
+	std::vector<std::tuple<size_t, size_t, double, size_t>> trace;
+	size_t bestTraceStart = -1;
+	double bestStartScore = 0;
+	for (size_t i = 0; i < leftPath.position.size(); i++)
+	{
+		if (rightPath.occurrences.count(leftPath.position[i]) == 1)
+		{
+			for (auto j : rightPath.occurrences.at(leftPath.position[i]))
+			{
+				trace.emplace_back(i, j, 0, (size_t)-1);
+				std::get<2>(trace.back()) = -(double)std::min(leftPath.cumulativePrefixLength[i], rightPath.cumulativePrefixLength[j]) * mismatchPenalty;
+				assert(std::get<2>(trace.back()) < leftPath.cumulativePrefixLength.back() && std::get<2>(trace.back()) < rightPath.cumulativePrefixLength.back());
+				assert(std::get<2>(trace.back()) > -(double)leftPath.cumulativePrefixLength.back() * mismatchPenalty || std::get<2>(trace.back()) > -(double)rightPath.cumulativePrefixLength.back() * mismatchPenalty);
+				for (size_t k = 0; k < trace.size()-1; k++)
+				{
+					if (std::get<0>(trace[k]) < i && std::get<1>(trace[k]) < j)
+					{
+						double insertions = leftPath.cumulativePrefixLength[i] - leftPath.cumulativePrefixLength[std::get<0>(trace[k])+1];
+						double deletions = rightPath.cumulativePrefixLength[j] - rightPath.cumulativePrefixLength[std::get<1>(trace[k])+1];
+						assert(insertions >= 0);
+						assert(deletions >= 0);
+						assert(insertions <= leftPath.cumulativePrefixLength.back());
+						assert(deletions <= rightPath.cumulativePrefixLength.back());
+						double btScore = std::get<2>(trace[k]) - std::max(insertions, deletions) * mismatchPenalty;
+						if (btScore > std::get<2>(trace.back()))
+						{
+							std::get<2>(trace.back()) = btScore;
+							std::get<3>(trace.back()) = k;
+						}
+					}
+				}
+				assert(leftPath.position[i] == rightPath.position[j]);
+				std::get<2>(trace.back()) += leftPath.nodeSize[i];
+				double startScoreHere = std::get<2>(trace.back()) - (double)std::min(leftPath.cumulativePrefixLength.back() - leftPath.cumulativePrefixLength[i+1], rightPath.cumulativePrefixLength.back() - rightPath.cumulativePrefixLength[j+1]) * mismatchPenalty;
+				if (startScoreHere > bestStartScore || bestTraceStart == -1)
+				{
+					bestTraceStart = trace.size()-1;
+					bestStartScore = startScoreHere;
+				}
+			}
+		}
+	}
+	Alignment result;
+	if (trace.size() == 0)
+	{
+		result.alignmentIdentity = 0;
+		return result;
+	}
+	size_t pos = bestTraceStart;
+	size_t i = std::get<0>(trace[pos]);
+	size_t j = std::get<1>(trace[pos]);
+	size_t matchLen = 0;
+	size_t mismatchLen = 0;
+	size_t indelSize = std::min(leftPath.cumulativePrefixLength.back() - leftPath.cumulativePrefixLength[i+1], rightPath.cumulativePrefixLength.back() - rightPath.cumulativePrefixLength[j+1]);
+	assert(indelSize >= 0);
+	assert(indelSize <= leftPath.cumulativePrefixLength.back() || indelSize <= rightPath.cumulativePrefixLength.back());
+	result.leftPath = left;
+	result.rightPath = right;
+	result.leftEnd = i;
+	result.rightEnd = j;
+	assert(result.leftEnd < leftPath.position.size());
+	assert(result.rightEnd < rightPath.position.size());
+	// one past the real end
+	while (result.leftEnd < leftPath.position.size() && leftPath.cumulativePrefixLength[result.leftEnd+1] - leftPath.cumulativePrefixLength[i+1] <= indelSize) result.leftEnd++;
+	while (result.rightEnd < rightPath.position.size() && rightPath.cumulativePrefixLength[result.rightEnd+1] - rightPath.cumulativePrefixLength[j+1] <= indelSize) result.rightEnd++;
+	// fix to correct position
+	result.leftEnd--;
+	result.rightEnd--;
+	assert(result.leftEnd == leftPath.position.size()-1 || result.rightEnd == rightPath.position.size()-1);
+	mismatchLen = indelSize;
+	while (std::get<3>(trace[pos]) != (size_t)-1)
+	{
+		assert(std::get<3>(trace[pos]) < pos);
+		i = std::get<0>(trace[pos]);
+		j = std::get<1>(trace[pos]);
+		matchLen += leftPath.nodeSize[i];
+		result.alignedPairs.emplace_back();
+		result.alignedPairs.back().leftIndex = i;
+		result.alignedPairs.back().rightIndex = j;
+		pos = std::get<3>(trace[pos]);
+		size_t nextI = std::get<0>(trace[pos]);
+		size_t nextJ = std::get<1>(trace[pos]);
+		indelSize = std::max(leftPath.cumulativePrefixLength[i] - leftPath.cumulativePrefixLength[nextI+1], rightPath.cumulativePrefixLength[j] - rightPath.cumulativePrefixLength[nextJ+1]);
+		assert(indelSize >= 0);
+		assert(indelSize <= leftPath.cumulativePrefixLength.back() || indelSize <= rightPath.cumulativePrefixLength.back());
+		mismatchLen += indelSize;
+	}
+	i = std::get<0>(trace[pos]);
+	j = std::get<1>(trace[pos]);
+	result.alignedPairs.emplace_back();
+	result.alignedPairs.back().leftIndex = i;
+	result.alignedPairs.back().rightIndex = j;
+	matchLen += leftPath.nodeSize[i];
+	indelSize = std::min(leftPath.cumulativePrefixLength[i], rightPath.cumulativePrefixLength[j]);
+	assert(indelSize >= 0);
+	assert(indelSize <= leftPath.cumulativePrefixLength.back() || indelSize <= rightPath.cumulativePrefixLength.back());
+	mismatchLen += indelSize;
+	result.leftStart = i;
+	result.rightStart = j;
+	while (result.leftStart > 0 && leftPath.cumulativePrefixLength[i] - leftPath.cumulativePrefixLength[result.leftStart-1] <= indelSize) result.leftStart--;
+	while (result.rightStart > 0 && rightPath.cumulativePrefixLength[j] - rightPath.cumulativePrefixLength[result.rightStart-1] <= indelSize) result.rightStart--;
+	assert(result.leftStart == 0 || result.rightStart == 0);
+	result.alignmentLength = matchLen + mismatchLen;
+	result.alignmentIdentity = (double)matchLen / ((double)mismatchLen + (double)matchLen);
+	return result;
+}
+
+Alignment align(const std::vector<NodePos>& leftPath, const std::vector<NodePos>& rightPath, const std::vector<size_t>& leftNodeSize, const std::vector<size_t>& rightNodeSize, size_t left, size_t right, double mismatchPenalty)
 {
 	enum BacktraceType
 	{
@@ -134,7 +268,6 @@ std::vector<Alignment> align(const std::vector<NodePos>& leftPath, const std::ve
 			matches[i].resize(rightPath.size()+1, 0);
 		}
 	}
-	// std::set<std::pair<size_t, size_t>> maxima;
 	size_t maxI = 0;
 	size_t maxJ = 0;
 	for (size_t i = 0; i < leftPath.size(); i++)
@@ -185,67 +318,65 @@ std::vector<Alignment> align(const std::vector<NodePos>& leftPath, const std::ve
 			}
 		}
 	}
-	std::vector<Alignment> result;
-	if (maxI == 0 && maxJ == 0) return result;
+	Alignment result;
+	if (maxI == 0 && maxJ == 0)
+	{
+		result.alignmentIdentity = 0;
+		return result;
+	}
 	size_t matchLen = 0;
 	size_t mismatchLen = 0;
-	// for (auto maximum : maxima)
-	// {
-	// 	size_t maxI = maximum.first;
-	// 	size_t maxJ = maximum.second;
-		result.emplace_back();
-		result.back().leftPath = left;
-		result.back().rightPath = right;
-		result.back().alignmentLength = 0;
-		result.back().leftEnd = maxI-1;
-		result.back().rightEnd = maxJ-1;
-		while (DPtrace[maxI][maxJ] != Start)
+	result.leftPath = left;
+	result.rightPath = right;
+	result.alignmentLength = 0;
+	result.leftEnd = maxI-1;
+	result.rightEnd = maxJ-1;
+	while (DPtrace[maxI][maxJ] != Start)
+	{
+		assert(maxI > 0);
+		assert(maxJ > 0);
+		size_t leftSize = leftNodeSize[maxI-1];
+		size_t rightSize = rightNodeSize[maxJ-1];
+		result.leftStart = maxI-1;
+		result.rightStart = maxJ-1;
+		switch(DPtrace[maxI][maxJ])
 		{
-			assert(maxI > 0);
-			assert(maxJ > 0);
-			size_t leftSize = leftNodeSize[maxI-1];
-			size_t rightSize = rightNodeSize[maxJ-1];
-			result.back().leftStart = maxI-1;
-			result.back().rightStart = maxJ-1;
-			switch(DPtrace[maxI][maxJ])
-			{
-				case Insertion:
-					mismatchLen += leftSize;
-					maxI -= 1;
-					continue;
-				case Deletion:
-					mismatchLen += rightSize;
-					maxJ -= 1;
-					continue;
-				case Match:
-					assert(leftSize == rightSize);
-					result.back().alignedPairs.emplace_back();
-					result.back().alignedPairs.back().leftIndex = maxI-1;
-					result.back().alignedPairs.back().rightIndex = maxJ-1;
-					matchLen += leftSize;
-					maxI -= 1;
-					maxJ -= 1;
-					continue;
-				case Mismatch:
-					mismatchLen += std::max(leftSize, rightSize);
-					maxI -= 1;
-					maxJ -= 1;
-					continue;
-				case Start:
-				default:
-					assert(false);
-			}
+			case Insertion:
+				mismatchLen += leftSize;
+				maxI -= 1;
+				continue;
+			case Deletion:
+				mismatchLen += rightSize;
+				maxJ -= 1;
+				continue;
+			case Match:
+				assert(leftSize == rightSize);
+				result.alignedPairs.emplace_back();
+				result.alignedPairs.back().leftIndex = maxI-1;
+				result.alignedPairs.back().rightIndex = maxJ-1;
+				matchLen += leftSize;
+				maxI -= 1;
+				maxJ -= 1;
+				continue;
+			case Mismatch:
+				mismatchLen += std::max(leftSize, rightSize);
+				maxI -= 1;
+				maxJ -= 1;
+				continue;
+			case Start:
+			default:
+				assert(false);
 		}
-		result.back().alignmentLength = matchLen + mismatchLen;
-		if (result.back().alignmentLength == 0)
-		{
-			result.back().alignmentIdentity = 0;
-		}
-		else
-		{
-			result.back().alignmentIdentity = (double)matchLen / ((double)matchLen + (double)mismatchLen);
-		}
-	// }
+	}
+	result.alignmentLength = matchLen + mismatchLen;
+	if (result.alignmentLength == 0)
+	{
+		result.alignmentIdentity = 0;
+	}
+	else
+	{
+		result.alignmentIdentity = (double)matchLen / ((double)matchLen + (double)mismatchLen);
+	}
 	return result;
 }
 
@@ -301,35 +432,47 @@ std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mis
 					size_t j = pair.first;
 					if (pair.second < minAlnLength) continue;
 					if (i == j) continue;
-					auto fwAlns = align(paths[i].position, paths[j].position, paths[i].nodeSize, paths[j].nodeSize, i, j, mismatchPenalty);
-					for (auto aln : fwAlns)
+					Alignment fwAln;
+					if (pair.second > paths[i].cumulativePrefixLength.back() || pair.second > paths[j].cumulativePrefixLength.back())
 					{
-						if (aln.alignmentLength < minAlnLength) continue;
-						if (aln.alignmentIdentity < minAlnIdentity) continue;
-						for (size_t i = 0; i < aln.alignedPairs.size(); i++)
-						{
-							aln.alignedPairs[i].leftReverse = false;
-							aln.alignedPairs[i].rightReverse = false;
-						}
-						aln.rightReverse = false;
-						resultsPerThread[thread].push_back(aln);
+						fwAln = align(paths[i].position, paths[j].position, paths[i].nodeSize, paths[j].nodeSize, i, j, mismatchPenalty);
 					}
-					auto bwAlns = align(paths[i].position, reversePaths[j].position, paths[i].nodeSize, reversePaths[j].nodeSize, i, j, mismatchPenalty);
-					for (auto aln : bwAlns)
+					else
 					{
-						if (aln.alignmentLength < minAlnLength) continue;
-						if (aln.alignmentIdentity < minAlnIdentity) continue;
-						aln.rightStart = paths[j].position.size() - 1 - aln.rightStart;
-						aln.rightEnd = paths[j].position.size() - 1 - aln.rightEnd;
-						std::swap(aln.rightStart, aln.rightEnd);
-						for (size_t i = 0; i < aln.alignedPairs.size(); i++)
+						fwAln = alignSparse(paths[i], paths[j], i, j, mismatchPenalty);
+					}
+					if (fwAln.alignmentLength >= minAlnLength && fwAln.alignmentIdentity >= minAlnIdentity)
+					{
+						for (size_t i = 0; i < fwAln.alignedPairs.size(); i++)
 						{
-							aln.alignedPairs[i].leftReverse = false;
-							aln.alignedPairs[i].rightReverse = true;
-							aln.alignedPairs[i].rightIndex = paths[j].position.size() - 1 - aln.alignedPairs[i].rightIndex;
+							fwAln.alignedPairs[i].leftReverse = false;
+							fwAln.alignedPairs[i].rightReverse = false;
 						}
-						aln.rightReverse = true;
-						resultsPerThread[thread].push_back(aln);
+						fwAln.rightReverse = false;
+						resultsPerThread[thread].push_back(fwAln);
+					}
+					Alignment bwAln;
+					if (pair.second > paths[i].cumulativePrefixLength.back() || pair.second > paths[j].cumulativePrefixLength.back())
+					{
+						bwAln = align(paths[i].position, reversePaths[j].position, paths[i].nodeSize, reversePaths[j].nodeSize, i, j, mismatchPenalty);
+					}
+					else
+					{
+						bwAln = alignSparse(paths[i], reversePaths[j], i, j, mismatchPenalty);
+					}
+					if (bwAln.alignmentLength >= minAlnLength && bwAln.alignmentIdentity >= minAlnIdentity)
+					{
+						bwAln.rightStart = paths[j].position.size() - 1 - bwAln.rightStart;
+						bwAln.rightEnd = paths[j].position.size() - 1 - bwAln.rightEnd;
+						std::swap(bwAln.rightStart, bwAln.rightEnd);
+						for (size_t i = 0; i < bwAln.alignedPairs.size(); i++)
+						{
+							bwAln.alignedPairs[i].leftReverse = false;
+							bwAln.alignedPairs[i].rightReverse = true;
+							bwAln.alignedPairs[i].rightIndex = paths[j].position.size() - 1 - bwAln.alignedPairs[i].rightIndex;
+						}
+						bwAln.rightReverse = true;
+						resultsPerThread[thread].push_back(bwAln);
 					}
 				}
 			}
@@ -448,6 +591,7 @@ std::vector<Path> addNodeLengths(const std::vector<Path>& original, const GfaGra
 		{
 			result[i].nodeSize.push_back(graph.nodes.at(original[i].position[j].id).size() - graph.edgeOverlap);
 		}
+		result[i].calculateCumulativePrefixLength();
 	}
 	return result;
 }
