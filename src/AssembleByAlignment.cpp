@@ -72,6 +72,7 @@ std::pair<NodePos, NodePos> canon(NodePos left, NodePos right)
 struct ClosureEdges
 {
 	std::map<std::pair<NodePos, NodePos>, size_t> coverage;
+	std::map<std::pair<NodePos, NodePos>, size_t> overlap;
 };
 
 struct DoublestrandedTransitiveClosureMapping
@@ -432,6 +433,7 @@ GfaGraph getGraph(const DoublestrandedTransitiveClosureMapping& transitiveClosur
 		if (outputtedClosures.count(pair.first.first.id) == 0 || outputtedClosures.count(pair.first.second.id) == 0) continue;
 		result.edges[pair.first.first].push_back(pair.first.second);
 	}
+	result.varyingOverlaps.insert(edges.overlap.begin(), edges.overlap.end());
 	std::cerr << edges.coverage.size() << " outputted edges" << std::endl;
 	return result;
 }
@@ -641,13 +643,16 @@ DoublestrandedTransitiveClosureMapping removeOutsideCoverageClosures(const Doubl
 		coverage[pair.second.id] += 1;
 	}
 	DoublestrandedTransitiveClosureMapping result;
+	std::unordered_set<size_t> numbers;
 	for (auto pair : closures.mapping)
 	{
 		if (coverage[pair.second.id] >= minCoverage && coverage[pair.second.id] <= maxCoverage)
 		{
 			result.mapping[pair.first] = pair.second;
+			numbers.insert(pair.second.id);
 		}
 	}
+	std::cerr << numbers.size() << " closures after removing low coverage" << std::endl;
 	std::cerr << result.mapping.size() << " closure items after removing low coverage" << std::endl;
 	return result;
 }
@@ -874,6 +879,74 @@ std::pair<DoublestrandedTransitiveClosureMapping, ClosureEdges> bridgeTips(const
 	return std::make_pair(resultClosures, resultEdges);
 }
 
+size_t getLongestOverlap(const std::string& left, const std::string& right, size_t maxOverlap)
+{
+	assert(left.size() >= maxOverlap);
+	assert(right.size() >= maxOverlap);
+	for (size_t i = maxOverlap; i > 0; i--)
+	{
+		if (left.substr(left.size()-maxOverlap) == right.substr(0, maxOverlap)) return i;
+	}
+	return 0;
+}
+
+ClosureEdges determineClosureOverlaps(const std::vector<Path>& paths, const DoublestrandedTransitiveClosureMapping& closures, const ClosureEdges& edges, const GfaGraph& graph)
+{
+	ClosureEdges result;
+	std::unordered_map<size_t, NodePos> closureRepresentsNode;
+	for (auto pair : closures.mapping)
+	{
+		assert(pair.first.first < paths.size());
+		assert(pair.first.second < paths[pair.first.first].position.size());
+		NodePos pos = paths[pair.first.first].position[pair.first.second];
+		assert(graph.nodes.count(pos.id) == 1);
+		if (!pair.second.end) pos = pos.Reverse();
+		assert(closureRepresentsNode.count(pair.second.id) == 0 || closureRepresentsNode.at(pair.second.id) == pos);
+		closureRepresentsNode[pair.second.id] = pos;
+	}
+	for (auto pair : edges.coverage)
+	{
+		NodePos fromClosure = pair.first.first;
+		NodePos toClosure = pair.first.second;
+		if (closureRepresentsNode.count(fromClosure.id) == 0) continue;
+		if (closureRepresentsNode.count(toClosure.id) == 0) continue;
+		result.coverage[pair.first] = pair.second;
+		auto key = std::make_pair(fromClosure, toClosure);
+		if (graph.varyingOverlaps.count(key) == 1)
+		{
+			result.overlap[key] = graph.varyingOverlaps.at(key);
+			continue;
+		}
+		assert(closureRepresentsNode.count(fromClosure.id) == 1);
+		assert(closureRepresentsNode.count(toClosure.id) == 1);
+		NodePos fromNode = closureRepresentsNode[fromClosure.id];
+		if (!fromClosure.end) fromNode = fromNode.Reverse();
+		NodePos toNode = closureRepresentsNode[toClosure.id];
+		if (!toClosure.end) toNode = toNode.Reverse();
+		bool hasEdge = false;
+		if (graph.edges.count(fromNode) == 1)
+		{
+			for (auto target : graph.edges.at(fromNode))
+			{
+				if (target == toNode) hasEdge = true;
+			}
+		}
+		if (hasEdge)
+		{
+			result.overlap[key] = graph.edgeOverlap;
+			continue;
+		}
+		assert(graph.nodes.count(fromNode.id) == 1);
+		assert(graph.nodes.count(toNode.id) == 1);
+		std::string before = graph.nodes.at(fromNode.id);
+		if (!fromNode.end) before = CommonUtils::ReverseComplement(before);
+		std::string after = graph.nodes.at(toNode.id);
+		if (!toNode.end) after = CommonUtils::ReverseComplement(after);
+		result.overlap[key] = getLongestOverlap(before, after, graph.edgeOverlap);
+	}
+	return result;
+}
+
 int main(int argc, char** argv)
 {
 	std::string inputGraph { argv[1] };
@@ -930,6 +1003,8 @@ int main(int argc, char** argv)
 	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 2, 8);
 	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 3, 10);
 	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 5, 20);
+	std::cerr << "determine closure overlaps" << std::endl;
+	closureEdges = determineClosureOverlaps(paths, doubleStrandedClosures, closureEdges, graph);
 	std::cerr << "graphify" << std::endl;
 	auto result = getGraph(doubleStrandedClosures, closureEdges, paths, graph);
 	std::cerr << "output" << std::endl;
