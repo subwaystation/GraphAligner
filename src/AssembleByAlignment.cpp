@@ -1095,13 +1095,17 @@ int main(int argc, char** argv)
 {
 	std::string inputGraph { argv[1] };
 	std::string inputAlns { argv[2] };
-	size_t alignmentEndCut = std::stol(argv[3]);
-	double mismatchPenalty = std::stod(argv[4]);
-	size_t minAlnLength = std::stol(argv[5]);
-	double minAlnIdentity = std::stod(argv[6]);
-	std::string outputGraph { argv[7] };
-	int numThreads = std::stoi(argv[8]);
-	int maxAlnCount = std::stoi(argv[9]);
+	std::string outputGraph { argv[3] };
+	size_t minAlnLength = std::stol(argv[4]);
+	double minAlnIdentity = std::stod(argv[5]);
+	int maxAlnCount = std::stoi(argv[6]);
+	int numThreads = std::stoi(argv[7]);
+
+	double mismatchPenalty = 10000;
+	if (minAlnIdentity < 1.0)
+	{
+		mismatchPenalty = 1.0 / (1.0 - minAlnIdentity);
+	}
 
 	std::cerr << "load graph" << std::endl;
 	auto graph = GfaGraph::LoadFromFile(inputGraph);
