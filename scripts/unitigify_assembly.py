@@ -102,7 +102,7 @@ for node in graph.nodes:
 	bwpos = (n.nodeid, False)
 	assert len(graph.edges[fwpos]) == 1
 	assert len(graph.edges[bwpos]) == 1
-	if (next_unitig, True) not in result.edges: result.edges[(next_unitig, True)] = []
+	if (next_unitig, True) not in result.edges: result.edges[(next_unitig, True)] = set()
 	result.edges[(next_unitig, True)].add(((next_unitig, True), getset(graph.edges[fwpos])[1]))
 	get_circular_unitig(fwpos)
 
