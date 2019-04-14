@@ -13,7 +13,7 @@ graph.load(infile)
 added_nodes = []
 removed_nodes = []
 added_edges = []
-next_id = 0
+next_id = 1
 
 for n in graph.nodes:
 	next_id = max(next_id, int(n))

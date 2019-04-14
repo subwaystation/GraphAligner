@@ -7,6 +7,7 @@ class Node:
 		self.length = 0
 		self.readcount = 0
 		self.frequency = 0
+		self.chain = None
 
 def reverse(pos):
 	return ((pos[0], not pos[1]))
@@ -66,7 +67,10 @@ class Graph:
 		with open(filename, 'w') as f:
 			for node in self.nodes:
 				n = self.nodes[node]
-				f.write("S\t" + str(n.nodeid) + "\t" + n.nodeseq + "\tLN:i:" + str(n.length) + '\tKC:i:' + str(n.readcount) + '\tkm:f:' + str(float(n.readcount)/float(n.length)) + '\n')
+				line = "S\t" + str(n.nodeid) + "\t" + n.nodeseq + "\tLN:i:" + str(n.length) + '\tKC:i:' + str(n.readcount) + '\tkm:f:' + str(float(n.readcount)/float(n.length))
+				if n.chain:
+					line += "\tbc:Z:" + str(n.chain)
+				f.write(line + '\n')
 			for edge in self.edges:
 				for target in self.edges[edge]:
 					f.write("L\t" + str(edge[0]) + "\t" + ("+" if edge[1] else "-") + "\t" + str(target[0][0]) + '\t' + ("+" if target[0][1] else "-") + '\t' + str(target[1]) + 'M' + '\n')

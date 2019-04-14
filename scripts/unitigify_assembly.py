@@ -15,7 +15,7 @@ graph.load(infile)
 
 unitig_mapping = {}
 result = Graph()
-next_unitig = 0
+next_unitig = 1
 
 def getset(s):
 	assert(len(s) == 1)
