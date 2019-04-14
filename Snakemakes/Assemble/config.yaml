@@ -1,0 +1,33 @@
+ShortReadDirectory: shortreads/
+ShortReads:
+- reads1.fq
+- reads2.fq.gz
+
+LongReadDirectory: longreads/
+LongReads:
+- reads1.fq
+- reads2.fq.gz
+
+TempDirectory: tmp/
+OutputDirectory: output/
+
+GenomeSize: 4600000
+ShortreadCoverage: 200
+SmallK: 21
+BigK: 63
+Abundance: 2
+
+MaxOverlapCount: 10
+MinOverlapLength: 100
+MinOverlapIdentity: 0.8
+
+# https://github.com/maickrau/GraphAligner
+GraphAlignerBinDirectory: ../../bin/
+GraphAlignerScriptDirectory: ../../scripts/
+# https://github.com/GATB/bcalm
+BcalmPath: bcalm/bin/bcalm
+BcalmConvertPath: bcalm/scripts/convertToGFA.py
+# https://github.com/mourisl/Lighter
+LighterPath: lighter/lighter
+# https://github.com/vgteam/vg/
+VGPath: vg
