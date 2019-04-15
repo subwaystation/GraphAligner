@@ -23,7 +23,7 @@ class Graph:
 		for tag in parts[3:]:
 			if tag[0:5] == 'LN:i:':
 				result.length = int(tag[5:])
-			elif tag[0:5] == 'KC:i:':
+			elif tag[0:5] == 'RC:i:':
 				result.readcount = int(tag[5:])
 			elif tag[0:5] == 'km:f:':
 				result.frequency = float(tag[5:])
@@ -46,8 +46,11 @@ class Graph:
 					overlap = int(parts[5][:-1])
 					if frompos not in self.edges: self.edges[frompos] = set()
 					if reverse(topos) not in self.edges: self.edges[reverse(topos)] = set()
-					self.edges[reverse(topos)].add((reverse(frompos), overlap))
-					self.edges[frompos].add((topos, overlap))
+					readcount = None
+					for tag in parts[6:]:
+						if tag[0:5] == "RC:i:": readcount = float(tag[5:])
+					self.edges[reverse(topos)].add((reverse(frompos), (overlap, readcount)))
+					self.edges[frompos].add((topos, (overlap, readcount)))
 	def remove_nonexistent_edges(self):
 		extra = []
 		for edge in self.edges:
@@ -67,10 +70,13 @@ class Graph:
 		with open(filename, 'w') as f:
 			for node in self.nodes:
 				n = self.nodes[node]
-				line = "S\t" + str(n.nodeid) + "\t" + n.nodeseq + "\tLN:i:" + str(n.length) + '\tKC:i:' + str(n.readcount) + '\tkm:f:' + str(float(n.readcount)/float(n.length))
+				line = "S\t" + str(n.nodeid) + "\t" + n.nodeseq + "\tLN:i:" + str(n.length) + '\tRC:i:' + str(n.readcount) + '\tkm:f:' + str(float(n.readcount)/float(n.length))
 				if n.chain:
 					line += "\tbc:Z:" + str(n.chain)
 				f.write(line + '\n')
 			for edge in self.edges:
 				for target in self.edges[edge]:
-					f.write("L\t" + str(edge[0]) + "\t" + ("+" if edge[1] else "-") + "\t" + str(target[0][0]) + '\t' + ("+" if target[0][1] else "-") + '\t' + str(target[1]) + 'M' + '\n')
+					line = "L\t" + str(edge[0]) + "\t" + ("+" if edge[1] else "-") + "\t" + str(target[0][0]) + '\t' + ("+" if target[0][1] else "-") + '\t' + str(target[1][0]) + 'M'
+					if target[1][1]:
+						line += "\tRC:i:" + str(target[1][1])
+					f.write(line + '\n')

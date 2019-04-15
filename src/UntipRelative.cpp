@@ -259,7 +259,7 @@ int main(int argc, char** argv)
 	int maxRemovableLen = std::stoi(argv[1]);
 	int minSafeLen = std::stoi(argv[2]);
 	double fraction = std::stod(argv[3]);
-	auto graph = GfaGraph::LoadFromStream(std::cin);
+	auto graph = GfaGraph::LoadFromStream(std::cin, true);
 	//write to cout
 
 	auto keptNodes = filterNodes(graph, maxRemovableLen, minSafeLen, fraction);

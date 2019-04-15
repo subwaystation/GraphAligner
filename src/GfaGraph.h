@@ -65,6 +65,7 @@ public:
 	std::unordered_map<std::pair<NodePos, NodePos>, size_t> varyingOverlaps;
 	size_t edgeOverlap;
 	std::unordered_map<int, std::string> tags;
+	std::unordered_map<std::pair<NodePos, NodePos>, std::string> edgeTags;
 	std::unordered_map<int, std::string> originalNodeName;
 private:
 	void numberBackToIntegers();

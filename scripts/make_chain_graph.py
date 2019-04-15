@@ -21,10 +21,13 @@ parent = {}
 def find(k1):
 	global parent
 	assert k1 in parent
-	if parent[k1] == k1: return k1
-	result = find(parent[k1])
-	parent[k1] = result
-	return result
+	chain = []
+	while parent[k1] != k1:
+		chain.append(k1)
+		k1 = parent[k1]
+	for k in chain:
+		parent[k] = k1
+	return k1
 
 def merge(k1, k2):
 	global parent
@@ -62,6 +65,7 @@ for n in graph.nodes:
 		newnode = Node()
 		newnode.nodeid = p
 		newnode.nodeseq = "*"
+		newnode.chain = p
 		chains.nodes[p] = newnode
 	chains.nodes[p].length += node.length
 	chains.nodes[p].readcount += node.readcount

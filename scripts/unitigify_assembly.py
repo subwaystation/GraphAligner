@@ -37,7 +37,7 @@ def get_unitig(pos):
 	while len(graph.edges[pos]) == 1 and getset(graph.edges[pos])[0][0] != pos[0]:
 		nextpos = getset(graph.edges[pos])[0]
 		revnextpos = reverse(nextpos)
-		overlap = getset(graph.edges[pos])[1]
+		overlap = getset(graph.edges[pos])[1][0]
 		if len(graph.edges[revnextpos]) != 1: break
 		pos = nextpos
 		assert pos[0] not in unitig_mapping
@@ -68,7 +68,7 @@ def get_circular_unitig(pos):
 		assert len(graph.edges[pos]) == 1
 		nextpos = getset(graph.edges[pos])[0]
 		revnextpos = reverse(nextpos)
-		overlap = getset(graph.edges[pos])[1]
+		overlap = getset(graph.edges[pos])[1][0]
 		assert len(graph.edges[revnextpos]) == 1
 		pos = nextpos
 		assert pos[0] not in unitig_mapping

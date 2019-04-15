@@ -63,6 +63,7 @@ GfaGraph GfaGraph::GetSubgraph(const std::unordered_set<int>& ids) const
 			{
 				if (ids.count(target.id) == 0) continue;
 				if (varyingOverlaps.count(std::make_pair(end, target)) == 1) result.varyingOverlaps[std::make_pair(end, target)] = varyingOverlaps.at(std::make_pair(end, target));
+				if (edgeTags.count(std::make_pair(end, target)) == 1) result.edgeTags[std::make_pair(end, target)] = edgeTags.at(std::make_pair(end, target));
 				result.edges[end].push_back(target);
 			}
 		}
@@ -73,6 +74,7 @@ GfaGraph GfaGraph::GetSubgraph(const std::unordered_set<int>& ids) const
 			{
 				if (ids.count(target.id) == 0) continue;
 				if (varyingOverlaps.count(std::make_pair(start, target)) == 1) result.varyingOverlaps[std::make_pair(start, target)] = varyingOverlaps.at(std::make_pair(start, target));
+				if (edgeTags.count(std::make_pair(start, target)) == 1) result.edgeTags[std::make_pair(start, target)] = edgeTags.at(std::make_pair(start, target));
 				result.edges[start].push_back(target);
 			}
 		}
@@ -134,7 +136,12 @@ void GfaGraph::SaveToStream(std::ostream& file) const
 			{
 				overlap = varyingOverlaps.at(std::make_pair(edge.first, target));
 			}
-			file << "L\t" << edge.first.id << "\t" << (edge.first.end ? "+" : "-") << "\t" << target.id << "\t" << (target.end ? "+" : "-") << "\t" << overlap << "M" << std::endl;
+			file << "L\t" << edge.first.id << "\t" << (edge.first.end ? "+" : "-") << "\t" << target.id << "\t" << (target.end ? "+" : "-") << "\t" << overlap << "M";
+			if (edgeTags.count(std::make_pair(edge.first, target)) == 1)
+			{
+				file << "\t" << edgeTags.at(std::make_pair(edge.first, target));
+			}
+			file  << std::endl;
 		}
 	}
 }
@@ -184,12 +191,20 @@ void GfaGraph::numberBackToIntegers()
 	std::unordered_map<NodePos, std::vector<NodePos>> newEdges;
 	std::unordered_map<std::pair<NodePos, NodePos>, size_t> newVaryingOverlaps;
 	std::unordered_map<int, std::string> newTags;
+	std::unordered_map<std::pair<NodePos, NodePos>, std::string> newEdgeTags;
 	for (auto pair : varyingOverlaps)
 	{
 		auto key = pair.first;
 		key.first.id = std::stoi(originalNodeName[key.first.id]);
 		key.second.id = std::stoi(originalNodeName[key.second.id]);
 		newVaryingOverlaps[key] = pair.second;
+	}
+	for (auto pair : edgeTags)
+	{
+		auto key = pair.first;
+		key.first.id = std::stoi(originalNodeName[key.first.id]);
+		key.second.id = std::stoi(originalNodeName[key.second.id]);
+		newEdgeTags[key] = pair.second;
 	}
 	for (auto pair : nodes)
 	{
@@ -208,6 +223,7 @@ void GfaGraph::numberBackToIntegers()
 		newTags[std::stoi(originalNodeName[tag.first])] = tag.second;
 	}
 	varyingOverlaps = std::move(newVaryingOverlaps);
+	edgeTags = std::move(newEdgeTags);
 	nodes = std::move(newNodes);
 	edges = std::move(newEdges);
 	tags = std::move(newTags);
@@ -272,6 +288,15 @@ GfaGraph GfaGraph::LoadFromStream(std::istream& file, bool allowVaryingOverlaps)
 			char dummyc;
 			sstr >> dummyc;
 			assert(dummyc == 'M');
+			std::string tags;
+			while (sstr.good())
+			{
+				char c = sstr.get();
+				if (sstr.good() && c != '\r' && c != '\n' && (c != '\t' || tags.size() > 0))
+				{
+					tags += c;
+				}
+			}
 			if (overlap < 0) throw CommonUtils::InvalidGraphException { "Edge overlap cannot be negative. Fix the graph" };
 			assert(overlap >= 0);
 			if (!allowVaryingOverlaps && result.edgeOverlap != std::numeric_limits<size_t>::max() && (size_t)overlap != result.edgeOverlap)
@@ -285,6 +310,10 @@ GfaGraph GfaGraph::LoadFromStream(std::istream& file, bool allowVaryingOverlaps)
 			if (allowVaryingOverlaps)
 			{
 				result.varyingOverlaps[std::make_pair(frompos, topos)] = overlap;
+			}
+			if (tags.size() > 0) 
+			{
+				result.edgeTags[std::make_pair(frompos, topos)] = tags;
 			}
 		}
 	}

@@ -567,7 +567,7 @@ GfaGraph getGraph(const DoublestrandedTransitiveClosureMapping& transitiveClosur
 		if (!pos.end) seq = CommonUtils::ReverseComplement(seq);
 		if (!pair.second.end) seq = CommonUtils::ReverseComplement(seq);
 		result.nodes[pair.second.id] = seq;
-		result.tags[pair.second.id] = "LN:i:" + std::to_string(seq.size() - graph.edgeOverlap) + "\tKC:i:" + std::to_string((seq.size() - graph.edgeOverlap) * closureCoverage[pair.second.id]) + "\tkm:f:" + std::to_string(closureCoverage[pair.second.id]) + "\toi:Z:" + std::to_string(pos.id) + (pos.end ? "+" : "-");
+		result.tags[pair.second.id] = "LN:i:" + std::to_string(seq.size() - graph.edgeOverlap) + "\tRC:i:" + std::to_string((seq.size() - graph.edgeOverlap) * closureCoverage[pair.second.id]) + "\tkm:f:" + std::to_string(closureCoverage[pair.second.id]) + "\toi:Z:" + std::to_string(pos.id) + (pos.end ? "+" : "-");
 		outputtedClosures.insert(pair.second.id);
 	}
 	std::cerr << outputtedClosures.size() << " outputted closures" << std::endl;
@@ -575,6 +575,7 @@ GfaGraph getGraph(const DoublestrandedTransitiveClosureMapping& transitiveClosur
 	{
 		if (outputtedClosures.count(pair.first.first.id) == 0 || outputtedClosures.count(pair.first.second.id) == 0) continue;
 		result.edges[pair.first.first].push_back(pair.first.second);
+		result.edgeTags[std::make_pair(pair.first.first, pair.first.second)] = "RC:i:" + std::to_string(pair.second);
 	}
 	result.varyingOverlaps.insert(edges.overlap.begin(), edges.overlap.end());
 	std::cerr << edges.coverage.size() << " outputted edges" << std::endl;
