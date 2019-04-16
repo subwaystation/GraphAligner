@@ -120,9 +120,14 @@ rule resolve_short_repeats:
 	output: temp(TMPDIR + "assembly-unitigs-untip-unitig-repeat.gfa")
 	shell: "{ALIGNERSCRIPTDIR}resolve_short_repeats.py {input} {output}"
 
-rule unitigify_3:
+rule untip_2:
 	input: rules.resolve_short_repeats.output
-	output: temp(TMPDIR + "assembly-unitigs-untip-unitig-repeat-unitig.gfa")
+	output: temp(TMPDIR + "assembly-unitigs-untip-unitig-repeat-untip.gfa")
+	shell: "{ALIGNERBINDIR}UntipRelative 1000 2000 0.01 < {input} > {output}"
+
+rule unitigify_3:
+	input: rules.untip_2.output
+	output: temp(TMPDIR + "assembly-unitigs-untip-unitig-repeat-untip-unitig.gfa")
 	shell: "{ALIGNERSCRIPTDIR}unitigify_assembly.py {input} {output}"
 
 rule topofy:

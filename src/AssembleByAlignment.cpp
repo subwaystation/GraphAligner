@@ -1,9 +1,11 @@
+#include <fstream>
 #include <string>
 #include <map>
 #include <vector>
 #include <unordered_set>
 #include <unordered_map>
 #include <thread>
+#include "stream.hpp"
 #include "CommonUtils.h"
 #include "vg.pb.h"
 #include "GfaGraph.h"
@@ -102,25 +104,32 @@ struct DoublestrandedTransitiveClosureMapping
 
 std::vector<Path> loadAlignmentsAsPaths(std::string fileName)
 {
-	std::unordered_map<std::string, std::vector<vg::Alignment>> alnsPerRead;
+	std::unordered_map<std::string, std::vector<std::pair<size_t, std::vector<NodePos>>>> alnsPerRead;
+
 	{
-		auto vgAlns = CommonUtils::LoadVGAlignments(fileName);
-		for (auto aln : vgAlns)
-		{
-			alnsPerRead[aln.name()].push_back(aln);
-		}
+		std::ifstream file { fileName, std::ios::in | std::ios::binary };
+		std::function<void(vg::Alignment&)> lambda = [&alnsPerRead](vg::Alignment& g) {
+			std::vector<NodePos> thisAln;
+			for (int i = 0; i < g.path().mapping_size(); i++)
+			{
+				thisAln.emplace_back(g.path().mapping(i).position().node_id(), !g.path().mapping(i).position().is_reverse());
+			}
+			alnsPerRead[g.name()].emplace_back(g.query_position(), thisAln);
+		};
+		stream::for_each(file, lambda);
 	}
+
 	std::vector<Path> result;
 	for (auto pair : alnsPerRead)
 	{
 		assert(pair.second.size() > 0);
-		std::sort(pair.second.begin(), pair.second.end(), [](const vg::Alignment& left, const vg::Alignment& right) { return left.query_position() < right.query_position(); });
+		std::sort(pair.second.begin(), pair.second.end(), [](const std::pair<size_t, std::vector<NodePos>>& left, const std::pair<size_t, std::vector<NodePos>>& right) { return left.first < right.first; });
 		result.emplace_back();
-		for (auto aln : pair.second)
+		for (auto p : pair.second)
 		{
-			for (int i = 0; i < aln.path().mapping_size(); i++)
+			for (auto pos : p.second)
 			{
-				result.back().position.emplace_back(aln.path().mapping(i).position().node_id(), !aln.path().mapping(i).position().is_reverse());
+				result.back().position.emplace_back(pos.id, pos.end);
 			}
 		}
 		if (result.back().position.size() == 0)
@@ -953,7 +962,7 @@ ClosureEdges getClosureEdges(const DoublestrandedTransitiveClosureMapping& closu
 	return result;
 }
 
-ClosureEdges removeChimericEdges(const DoublestrandedTransitiveClosureMapping& closures, const ClosureEdges& edges, size_t maxRemovableCoverage, size_t minSafeCoverage)
+ClosureEdges removeChimericEdges(const DoublestrandedTransitiveClosureMapping& closures, const ClosureEdges& edges, size_t maxRemovableCoverage, double fraction)
 {
 	std::unordered_map<NodePos, size_t> maxOutEdgeCoverage;
 	for (auto edge : edges.coverage)
@@ -966,8 +975,8 @@ ClosureEdges removeChimericEdges(const DoublestrandedTransitiveClosureMapping& c
 	{
 		if (edge.second <= maxRemovableCoverage)
 		{
-			if (maxOutEdgeCoverage[edge.first.first] >= minSafeCoverage) continue;
-			if (maxOutEdgeCoverage[edge.first.second.Reverse()] >= minSafeCoverage) continue;
+			if ((double)edge.second < (double)maxOutEdgeCoverage[edge.first.first] * fraction) continue;
+			if ((double)edge.second < (double)maxOutEdgeCoverage[edge.first.second.Reverse()] * fraction) continue;
 		}
 		result.coverage[edge.first] = edge.second;
 	}
@@ -1148,10 +1157,7 @@ int main(int argc, char** argv)
 	// std::cerr << "insert middles" << std::endl;
 	// doubleStrandedClosures = insertMiddles(doubleStrandedClosures, paths);
 	std::cerr << "remove chimeric edges" << std::endl;
-	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 1, 3);
-	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 2, 8);
-	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 3, 10);
-	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 5, 20);
+	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 5, 0.2);
 	std::cerr << "determine closure overlaps" << std::endl;
 	closureEdges = determineClosureOverlaps(paths, doubleStrandedClosures, closureEdges, graph);
 	std::cerr << "graphify" << std::endl;

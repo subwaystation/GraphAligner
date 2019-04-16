@@ -39,19 +39,19 @@ for n in graph.nodes:
 	cov_count = 0
 	for fw in graph.edges[fwpos]:
 		if fw[0][0] == other_node: continue
-		fw_node = fw[0][0]
+		fw_node = fw[0]
 		cov_sum += fw[1][1]
 		cov_count += 1
 	for bw in graph.edges[bwpos]:
 		if bw[0][0] == other_node: continue
-		bw_node = bw[0][0]
+		bw_node = bw[0]
 		cov_sum += bw[1][1]
 		cov_count += 1
 	if fw_node == None: continue
 	if bw_node == None: continue
 	if fw_node == bw_node: continue
-	if fw_node == n: continue
-	if bw_node == n: continue
+	if fw_node[0] == n: continue
+	if bw_node[0] == n: continue
 	if cov_count != 2: continue
 	avg_cov = float(cov_sum) / float(cov_count)
 	this_votes = int(round(graph.nodes[n].frequency / avg_cov))
