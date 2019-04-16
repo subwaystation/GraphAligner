@@ -75,6 +75,35 @@ struct Alignment
 	double alignmentIdentity;
 };
 
+template <typename T>
+class Oriented2dVector
+{
+public:
+	T& operator[](const std::pair<size_t, NodePos>& pos)
+	{
+		if (pos.second.end) return plus[pos.first][pos.second.id];
+		return minus[pos.first][pos.second.id];
+	}
+	const T& operator[](const std::pair<size_t, NodePos>& pos) const
+	{
+		if (pos.second.end) return plus[pos.first][pos.second.id];
+		return minus[pos.first][pos.second.id];
+	}
+	void resize(size_t size)
+	{
+		plus.resize(size);
+		minus.resize(size);
+	}
+	void resizePart(size_t index, size_t size)
+	{
+		plus[index].resize(size);
+		minus[index].resize(size);
+	}
+private:
+	std::vector<std::vector<T>> plus;
+	std::vector<std::vector<T>> minus;
+};
+
 bool AlignmentQualityCompareLT(const Alignment& left, const Alignment& right)
 {
 	return left.alignmentLength * left.alignmentIdentity < right.alignmentLength * right.alignmentIdentity;
@@ -615,16 +644,35 @@ void set(std::map<T, T>& parent, T key, T target)
 	parent[found] = find(parent, target);
 }
 
+std::pair<size_t, NodePos> find(Oriented2dVector<std::pair<size_t, NodePos>>& parent, std::pair<size_t, NodePos> key)
+{
+	if (parent[key] == key)
+	{
+		return key;
+	}
+	auto result = find(parent, parent[key]);
+	parent[key] = result;
+	return result;
+}
+
+void set(Oriented2dVector<std::pair<size_t, NodePos>>& parent, std::pair<size_t, NodePos> key, std::pair<size_t, NodePos> target)
+{
+	auto found = find(parent, key);
+	parent[found] = find(parent, target);
+}
+
 TransitiveClosureMapping getTransitiveClosures(const std::vector<Path>& paths, const std::vector<Alignment>& alns)
 {
 	TransitiveClosureMapping result;
-	std::map<std::pair<size_t, NodePos>, std::pair<size_t, NodePos>> parent;
+	Oriented2dVector<std::pair<size_t, NodePos>> parent;
+	parent.resize(paths.size());
 	for (size_t i = 0; i < paths.size(); i++)
 	{
+		parent.resizePart(i, paths[i].position.size());
 		for (size_t j = 0; j < paths[i].position.size(); j++)
 		{
-			find(parent, std::pair<size_t, NodePos> { i, NodePos { j, true } });
-			find(parent, std::pair<size_t, NodePos> { i, NodePos { j, false } });
+			parent[std::pair<size_t, NodePos> { i, NodePos { j, true } }] = std::pair<size_t, NodePos> { i, NodePos { j, true } };
+			parent[std::pair<size_t, NodePos> { i, NodePos { j, false } }] = std::pair<size_t, NodePos> { i, NodePos { j, false } };
 		}
 	}
 	for (auto aln : alns)
@@ -638,15 +686,27 @@ TransitiveClosureMapping getTransitiveClosures(const std::vector<Path>& paths, c
 	}
 	std::map<std::pair<size_t, NodePos>, size_t> closureNumber;
 	size_t nextClosure = 0;
-	for (auto key : parent)
+	for (size_t i = 0; i < paths.size(); i++)
 	{
-		auto found = find(parent, key.first);
-		if (closureNumber.count(found) == 0)
+		for (size_t j = 0; j < paths[i].position.size(); j++)
 		{
-			closureNumber[found] = nextClosure;
-			nextClosure += 1;
+			auto key = std::pair<size_t, NodePos> { i, NodePos { j, true } };
+			auto found = find(parent, key);
+			if (closureNumber.count(found) == 0)
+			{
+				closureNumber[found] = nextClosure;
+				nextClosure += 1;
+			}
+			result.mapping[key] = closureNumber.at(found);
+			key = std::pair<size_t, NodePos> { i, NodePos { j, false } };
+			found = find(parent, key);
+			if (closureNumber.count(found) == 0)
+			{
+				closureNumber[found] = nextClosure;
+				nextClosure += 1;
+			}
+			result.mapping[key] = closureNumber.at(found);
 		}
-		result.mapping[key.first] = closureNumber.at(found);
 	}
 	std::cerr << nextClosure << " transitive closure sets" << std::endl;
 	std::cerr << result.mapping.size() << " transitive closure items" << std::endl;
