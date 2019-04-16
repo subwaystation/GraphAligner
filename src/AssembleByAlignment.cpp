@@ -475,7 +475,7 @@ Alignment align(const std::vector<NodePos>& leftPath, const std::vector<NodePos>
 	return result;
 }
 
-std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size_t minAlnLength, double minAlnIdentity, int numThreads, size_t maxAlnCount)
+std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size_t minAlnLength, double minAlnIdentity, int numThreads)
 {
 	std::vector<Alignment> result;
 	std::vector<Path> reversePaths;
@@ -497,11 +497,9 @@ std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mis
 	std::vector<std::thread> threads;
 	std::mutex nextReadMutex;
 	size_t nextRead = 0;
-	std::atomic<size_t> fullAlnCount;
-	fullAlnCount = 0;
 	for (size_t thread = 0; thread < numThreads; thread++)
 	{
-		threads.emplace_back([&paths, &nextRead, &nextReadMutex, &resultsPerThread, thread, &crossesNode, minAlnIdentity, minAlnLength, mismatchPenalty, &reversePaths, maxAlnCount, &fullAlnCount]()
+		threads.emplace_back([&paths, &nextRead, &nextReadMutex, &resultsPerThread, thread, &crossesNode, minAlnIdentity, minAlnLength, mismatchPenalty, &reversePaths]()
 		{
 			while (true)
 			{
@@ -524,8 +522,6 @@ std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mis
 						possibleMatches[other] += nodeSize;
 					}
 				}
-				size_t alignmentsCountHere = 0;
-				std::vector<Alignment> alignmentsHere;
 				for (auto pair : possibleMatches)
 				{
 					size_t j = pair.first;
@@ -548,7 +544,7 @@ std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mis
 							fwAln.alignedPairs[i].rightReverse = false;
 						}
 						fwAln.rightReverse = false;
-						alignmentsHere.emplace_back(std::move(fwAln));
+						resultsPerThread[thread].push_back(fwAln);
 					}
 					Alignment bwAln;
 					if (pair.second > paths[i].cumulativePrefixLength.back() || pair.second > paths[j].cumulativePrefixLength.back())
@@ -571,43 +567,8 @@ std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mis
 							bwAln.alignedPairs[i].rightIndex = paths[j].position.size() - 1 - bwAln.alignedPairs[i].rightIndex;
 						}
 						bwAln.rightReverse = true;
-						alignmentsHere.emplace_back(std::move(bwAln));
+						resultsPerThread[thread].push_back(bwAln);
 					}
-				}
-				fullAlnCount += alignmentsHere.size();
-
-				std::vector<size_t> leftAlns;
-				std::vector<size_t> rightAlns;
-				for (size_t j = 0; j < alignmentsHere.size(); j++)
-				{
-					assert(alignmentsHere[j].leftPath == i);
-					if (alignmentsHere[j].leftStart == 0) leftAlns.push_back(j);
-					if (alignmentsHere[j].leftEnd == paths[alignmentsHere[j].leftPath].position.size()-1) rightAlns.push_back(j);
-				}
-
-				std::set<size_t> pickedAlns;
-				if (leftAlns.size() > maxAlnCount)
-				{
-					std::sort(leftAlns.begin(), leftAlns.end(), AlignmentComparerLT { alignmentsHere });
-					pickedAlns.insert(leftAlns.end() - maxAlnCount, leftAlns.end());
-				}
-				else
-				{
-					pickedAlns.insert(leftAlns.begin(), leftAlns.end());
-				}
-				if (rightAlns.size() > maxAlnCount)
-				{
-					std::sort(rightAlns.begin(), rightAlns.end(), AlignmentComparerLT { alignmentsHere });
-					pickedAlns.insert(rightAlns.end() - maxAlnCount, rightAlns.end());
-				}
-				else
-				{
-					pickedAlns.insert(rightAlns.begin(), rightAlns.end());
-				}
-
-				for (auto index : pickedAlns)
-				{
-					resultsPerThread[thread].push_back(alignmentsHere[index]);
 				}
 			}
 		});
@@ -617,8 +578,7 @@ std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mis
 		threads[i].join();
 		result.insert(result.end(), resultsPerThread[i].begin(), resultsPerThread[i].end());
 	}
-	std::cerr << fullAlnCount << " induced alignments" << std::endl;
-	std::cerr << result.size() << " once-filtered alignments" << std::endl;
+	std::cerr << result.size() << " induced alignments" << std::endl;
 	return result;
 }
 
@@ -1336,7 +1296,7 @@ int main(int argc, char** argv)
 	std::cerr << "filter paths on length" << std::endl;
 	paths = filterByLength(paths, 1000);
 	std::cerr << "induce overlaps" << std::endl;
-	auto alns = induceOverlaps(paths, mismatchPenalty, minAlnLength, minAlnIdentity, numThreads, maxAlnCount);
+	auto alns = induceOverlaps(paths, mismatchPenalty, minAlnLength, minAlnIdentity, numThreads);
 	// std::cerr << "remove non-dovetail alignments" << std::endl;
 	// alns = removeNonDovetails(paths, alns);
 	std::cerr << "pick longest alignments" << std::endl;
