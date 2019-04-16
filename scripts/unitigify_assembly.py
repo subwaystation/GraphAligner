@@ -5,6 +5,7 @@ from Gfa import *
 
 infile = sys.argv[1]
 outfile = sys.argv[2]
+mappingfile = sys.argv[3]
 
 def revcomp(s):
 	rev = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C', 'a': 't', 't': 'a', 'c': 'g',  'g': 'c'}
@@ -112,6 +113,8 @@ for node in graph.nodes:
 	result.nodes[unitig_mapping[n.nodeid][0]].length += n.length
 	result.nodes[unitig_mapping[n.nodeid][0]].readcount += n.readcount
 
+mapping_edges = []
+
 for edge in graph.edges:
 	assert edge[0] in unitig_mapping
 	frompos = unitig_mapping[edge[0]]
@@ -123,5 +126,13 @@ for edge in graph.edges:
 		if frompos == topos: continue
 		if frompos not in result.edges: result.edges[frompos] = set()
 		result.edges[frompos].add((topos, target[1]))
+		mapping_edges.append((edge, target[0]))
 
 result.write(outfile)
+
+with open(mappingfile, 'w') as f:
+	for n in unitig_mapping:
+		f.write('N\t' + str(n) + '\t' + str(unitig_mapping[n][0]) + '\t' + ("+" if unitig_mapping[n][1] else "-") + '\n')
+	for e in mapping_edges:
+		f.write('E\t' + str(e[0][0]) + '\t' + ("+" if e[0][1] else "-") + '\t' + str(e[1][0]) + '\t' + ("+" if e[1][1] else "-") + '\n')
+		f.write('E\t' + str(e[1][0]) + '\t' + ("+" if not e[1][1] else "-") + '\t' + str(e[0][0]) + '\t' + ("+" if not e[0][1] else "-") + '\n')

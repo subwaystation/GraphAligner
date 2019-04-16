@@ -92,31 +92,36 @@ rule initial_assembly:
 		graph = TMPDIR + "graph.gfa",
 		alignments = rules.align_reads.output
 	output:
-		assembly = temp(TMPDIR + "assembly.gfa")
+		assembly = temp(TMPDIR + "assembly.gfa"),
+		translatedreads = temp(TMPDIR + "alns-translated.gfa")
 	threads: 40
 	log:
 		stdout = TMPDIR + "assemble_stdout.txt",
 		stderr = TMPDIR + "assemble_stderr.txt"
 	shell:
-		"/usr/bin/time -v {ALIGNERBINDIR}AssembleByAlignment {input.graph} {input.alignments} {output} {MINOVERLAPLENGTH} {MINOVERLAPIDENTITY} {MAXOVERLAPCOUNT} {threads} 1> {log.stdout} 2> {log.stderr}"
+		"/usr/bin/time -v {ALIGNERBINDIR}AssembleByAlignment {input.graph} {input.alignments} {output.assembly} {output.translatedreads} {MINOVERLAPLENGTH} {MINOVERLAPIDENTITY} {MAXOVERLAPCOUNT} {threads} 1> {log.stdout} 2> {log.stderr}"
 
 rule unitigify_1:
-	input: rules.initial_assembly.output
-	output: temp(TMPDIR + "assembly-unitig.gfa")
-	shell: "{ALIGNERSCRIPTDIR}unitigify_assembly.py {input} {output}"
+	input: rules.initial_assembly.output.assembly
+	output:
+		graph = temp(TMPDIR + "assembly-unitig.gfa"),
+		translation = temp(TMPDIR + "translation-unitig.txt")
+	shell: "{ALIGNERSCRIPTDIR}unitigify_assembly.py {input} {output.graph} {output.translation}"
 
 rule untip:
-	input: rules.unitigify_1.output
+	input: rules.unitigify_1.output.graph
 	output: temp(TMPDIR + "assembly-unitig-untip.gfa")
 	shell: "{ALIGNERBINDIR}UntipRelative 1000 2000 0.01 < {input} > {output}"
 
 rule unitigify_2:
 	input: rules.untip.output
-	output: temp(TMPDIR + "assembly-unitig-untip-unitig.gfa")
-	shell: "{ALIGNERSCRIPTDIR}unitigify_assembly.py {input} {output}"
+	output:
+		graph = temp(TMPDIR + "assembly-unitig-untip-unitig.gfa"),
+		translation = temp(TMPDIR + "translation-unitig-untip-unitig.txt")
+	shell: "{ALIGNERSCRIPTDIR}unitigify_assembly.py {input} {output.graph} {output.translation}"
 
 rule resolve_short_repeats:
-	input: rules.unitigify_2.output
+	input: rules.unitigify_2.output.graph
 	output: temp(TMPDIR + "assembly-unitigs-untip-unitig-repeat.gfa")
 	shell: "{ALIGNERSCRIPTDIR}resolve_short_repeats.py {input} {output}"
 
@@ -127,11 +132,13 @@ rule untip_2:
 
 rule unitigify_3:
 	input: rules.untip_2.output
-	output: temp(TMPDIR + "assembly-unitigs-untip-unitig-repeat-untip-unitig.gfa")
-	shell: "{ALIGNERSCRIPTDIR}unitigify_assembly.py {input} {output}"
+	output:
+		graph = temp(TMPDIR + "assembly-unitigs-untip-unitig-repeat-untip-unitig.gfa"),
+		translation = temp(TMPDIR + "translation-unitigs-untip-unitig-repeat-untip-unitig.txt")
+	shell: "{ALIGNERSCRIPTDIR}unitigify_assembly.py {input} {output.graph} {output.translation}"
 
 rule topofy:
-	input: rules.unitigify_3.output
+	input: rules.unitigify_3.output.graph
 	output: temp(TMPDIR + "topo.gfa")
 	shell: "{ALIGNERSCRIPTDIR}filter_unconnected_nodes.py {input} {output}"
 
@@ -154,7 +161,7 @@ rule fix_traversals:
 
 rule make_chains:
 	input:
-		graph = rules.unitigify_3.output,
+		graph = rules.unitigify_3.output.graph,
 		traversals = rules.fix_traversals.output
 	output:
 		graph_withchains = OUTDIR + "assembly_withchains.gfa",

@@ -104,6 +104,9 @@ $(BINDIR)/SplitGraph: $(SRCDIR)/SplitGraph.cpp $(ODIR)/CommonUtils.o $(ODIR)/vg.
 $(BINDIR)/AssembleByAlignment: $(SRCDIR)/AssembleByAlignment.cpp $(ODIR)/CommonUtils.o $(ODIR)/vg.pb.o $(ODIR)/GfaGraph.o $(ODIR)/fastqloader.o $(ODIR)/ThreadReadAssertion.o
 	$(GPP) -o $@ $^ $(LINKFLAGS)
 
+$(BINDIR)/TranslatePath: $(SRCDIR)/TranslatePath.cpp $(ODIR)/CommonUtils.o $(ODIR)/vg.pb.o $(ODIR)/GfaGraph.o $(ODIR)/fastqloader.o $(ODIR)/ThreadReadAssertion.o
+	$(GPP) -o $@ $^ $(LINKFLAGS)
+
 all: $(BINDIR)/GraphAligner $(BINDIR)/SimulateReads $(BINDIR)/ReverseReads $(BINDIR)/SupportedSubgraph $(BINDIR)/MafToAlignment $(BINDIR)/ExtractPathSequence $(BINDIR)/ExtractPathSubgraphNeighbourhood $(BINDIR)/VisualizeAlignment $(BINDIR)/NodePosCsv $(BINDIR)/ExtractExactPathSubgraph $(BINDIR)/EstimateRepeatCount $(BINDIR)/PickMummerSeeds $(BINDIR)/SelectLongestAlignment $(BINDIR)/Postprocess $(BINDIR)/AlignmentSubsequenceIdentity $(BINDIR)/BruteForceExactPrefixSeeds $(BINDIR)/PickAdjacentAlnPairs $(BINDIR)/ExtractCorrectedReads $(BINDIR)/UntipRelative $(BINDIR)/UnitigifyDBG
 
 clean:
