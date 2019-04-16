@@ -682,6 +682,9 @@ TransitiveClosureMapping getTransitiveClosures(const std::vector<Path>& paths, c
 			std::pair<size_t, NodePos> leftKey { aln.leftPath, NodePos { pair.leftIndex, pair.leftReverse } };
 			std::pair<size_t, NodePos> rightKey { aln.rightPath, NodePos { pair.rightIndex, pair.rightReverse } };
 			set(parent, leftKey, rightKey);
+			std::pair<size_t, NodePos> revLeftKey { aln.leftPath, NodePos { pair.leftIndex, !pair.leftReverse } };
+			std::pair<size_t, NodePos> revRightKey { aln.rightPath, NodePos { pair.rightIndex, !pair.rightReverse } };
+			set(parent, revLeftKey, revRightKey);
 		}
 	}
 	std::map<std::pair<size_t, NodePos>, size_t> closureNumber;
@@ -1297,12 +1300,22 @@ int main(int argc, char** argv)
 	// alns = removeHighCoverageAlignments(paths, alns, 40);
 	// std::cerr << "pick lowest error alignments" << std::endl;
 	// alns = pickLowestErrorPerRead(paths, alns, 3);
-	std::cerr << "double alignments" << std::endl;
-	alns = doubleAlignments(alns);
+	// std::cerr << "double alignments" << std::endl;
+	// alns = doubleAlignments(alns);
 	std::cerr << "get transitive closure" << std::endl;
 	auto transitiveClosures = getTransitiveClosures(paths, alns);
+	std::cerr << "deallocate alignments" << std::endl;
+	{
+		decltype(alns) tmp;
+		std::swap(alns, tmp);
+	}
 	std::cerr << "merge double strands" << std::endl;
 	auto doubleStrandedClosures = mergeDoublestrandClosures(paths, transitiveClosures);
+	std::cerr << "deallocate one-stranded closures" << std::endl;
+	{
+		decltype(transitiveClosures) tmp;
+		std::swap(transitiveClosures, tmp);
+	}
 	std::cerr << "get closure edges" << std::endl;
 	auto closureEdges = getClosureEdges(doubleStrandedClosures, paths);
 	std::cerr << "remove wrong coverage closures" << std::endl;
