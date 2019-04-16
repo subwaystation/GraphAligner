@@ -18,6 +18,7 @@ bool operator<(const std::pair<size_t, NodePos>& left, const std::pair<size_t, N
 
 struct Path
 {
+	std::string name;
 	std::vector<NodePos> position;
 	std::vector<size_t> nodeSize;
 	std::vector<size_t> cumulativePrefixLength;
@@ -209,6 +210,7 @@ std::vector<Path> loadAlignmentsAsPaths(std::string fileName)
 		assert(pair.second.size() > 0);
 		std::sort(pair.second.begin(), pair.second.end(), [](const std::pair<size_t, std::vector<NodePos>>& left, const std::pair<size_t, std::vector<NodePos>>& right) { return left.first < right.first; });
 		result.emplace_back();
+		result.back().name = pair.first;
 		for (auto p : pair.second)
 		{
 			for (auto pos : p.second)
@@ -688,7 +690,7 @@ TransitiveClosureMapping getTransitiveClosures(const std::vector<Path>& paths, c
 		}
 	}
 	std::map<std::pair<size_t, NodePos>, size_t> closureNumber;
-	size_t nextClosure = 0;
+	size_t nextClosure = 1;
 	for (size_t i = 0; i < paths.size(); i++)
 	{
 		for (size_t j = 0; j < paths[i].position.size(); j++)
@@ -711,7 +713,7 @@ TransitiveClosureMapping getTransitiveClosures(const std::vector<Path>& paths, c
 			result.mapping[key] = closureNumber.at(found);
 		}
 	}
-	std::cerr << nextClosure << " transitive closure sets" << std::endl;
+	std::cerr << (nextClosure-1) << " transitive closure sets" << std::endl;
 	std::cerr << result.mapping.size() << " transitive closure items" << std::endl;
 	return result;
 }
@@ -768,7 +770,7 @@ DoublestrandedTransitiveClosureMapping mergeDoublestrandClosures(const std::vect
 {
 	DoublestrandedTransitiveClosureMapping result;
 	std::unordered_map<size_t, NodePos> mapping;
-	int nextId = 0;
+	int nextId = 1;
 	for (size_t i = 0; i < paths.size(); i++)
 	{
 		for (size_t j = 0; j < paths[i].position.size(); j++)
@@ -798,7 +800,7 @@ DoublestrandedTransitiveClosureMapping mergeDoublestrandClosures(const std::vect
 			result.mapping[std::pair<size_t, size_t> { i, j }] = mapping.at(fwSet);
 		}
 	}
-	std::cerr << nextId << " doublestranded transitive closure sets" << std::endl;
+	std::cerr << (nextId-1) << " doublestranded transitive closure sets" << std::endl;
 	return result;
 }
 
@@ -1259,15 +1261,64 @@ ClosureEdges determineClosureOverlaps(const std::vector<Path>& paths, const Doub
 	return result;
 }
 
+void outputRemappedReads(std::string filename, const std::vector<Path>& paths, const DoublestrandedTransitiveClosureMapping& closures, const ClosureEdges& edges)
+{
+	std::vector<vg::Alignment> alns;
+	for (size_t i = 0; i < paths.size(); i++)
+	{
+		std::vector<std::vector<NodePos>> validSubpaths;
+		validSubpaths.emplace_back();
+		for (size_t j = 0; j < paths[j].position.size(); j++)
+		{
+			auto key = std::make_pair(i, j);
+			if (closures.mapping.count(key) == 0)
+			{
+				if (validSubpaths.back().size() != 0) validSubpaths.emplace_back();
+				continue;
+			}
+			if (j > 0)
+			{
+				auto previousKey = std::make_pair(i, j-1);
+				bool broken = false;
+				if (closures.mapping.count(previousKey) == 0) broken = true;
+				else if (edges.coverage.count(canon(closures.mapping.at(previousKey), closures.mapping.at(key))) == 0) broken = true;
+				if (broken)
+				{
+					if (validSubpaths.back().size() != 0) validSubpaths.emplace_back();
+				}
+			}
+			validSubpaths.back().emplace_back(closures.mapping.at(key));
+		}
+		size_t currentNum = 0;
+		for (size_t j = 0; j < validSubpaths.size(); j++)
+		{
+			if (validSubpaths[j].size() == 0) continue;
+			alns.emplace_back();
+			alns.back().set_name(paths[i].name + "_" + std::to_string(currentNum));
+			currentNum++;
+			for (size_t k = 0; k < validSubpaths[j].size(); k++)
+			{
+				auto mapping = alns.back().mutable_path()->add_mapping();
+				mapping->mutable_position()->set_node_id(validSubpaths[j][k].id);
+				mapping->mutable_position()->set_is_reverse(!validSubpaths[j][k].end);
+			}
+		}
+	}
+
+	std::ofstream alignmentOut { filename, std::ios::out | std::ios::binary };
+	stream::write_buffered(alignmentOut, alns, 0);
+}
+
 int main(int argc, char** argv)
 {
 	std::string inputGraph { argv[1] };
 	std::string inputAlns { argv[2] };
 	std::string outputGraph { argv[3] };
-	size_t minAlnLength = std::stol(argv[4]);
-	double minAlnIdentity = std::stod(argv[5]);
-	int maxAlnCount = std::stoi(argv[6]);
-	int numThreads = std::stoi(argv[7]);
+	std::string outputPaths { argv[4] };
+	size_t minAlnLength = std::stol(argv[5]);
+	double minAlnIdentity = std::stod(argv[6]);
+	int maxAlnCount = std::stoi(argv[7]);
+	int numThreads = std::stoi(argv[8]);
 
 	double mismatchPenalty = 10000;
 	if (minAlnIdentity < 1.0)
@@ -1330,6 +1381,8 @@ int main(int argc, char** argv)
 	closureEdges = determineClosureOverlaps(paths, doubleStrandedClosures, closureEdges, graph);
 	std::cerr << "graphify" << std::endl;
 	auto result = getGraph(doubleStrandedClosures, closureEdges, paths, graph);
-	std::cerr << "output" << std::endl;
+	std::cerr << "output graph" << std::endl;
 	result.SaveToFile(outputGraph);
+	std::cerr << "output translated paths" << std::endl;
+	outputRemappedReads(outputPaths, paths, doubleStrandedClosures, closureEdges);
 }
