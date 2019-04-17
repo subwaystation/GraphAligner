@@ -93,7 +93,7 @@ rule initial_assembly:
 		alignments = rules.align_reads.output
 	output:
 		assembly = temp(TMPDIR + "assembly.gfa"),
-		translatedreads = temp(TMPDIR + "alns-translated.gfa")
+		translatedreads = temp(TMPDIR + "alns-translated.gam")
 	threads: 40
 	log:
 		stdout = TMPDIR + "assemble_stdout.txt",
