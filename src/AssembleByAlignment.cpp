@@ -1,3 +1,4 @@
+#include <concurrentqueue.h>
 #include <queue>
 #include <fstream>
 #include <string>
@@ -475,7 +476,7 @@ Alignment align(const std::vector<NodePos>& leftPath, const std::vector<NodePos>
 	return result;
 }
 
-std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size_t minAlnLength, double minAlnIdentity, int numThreads)
+std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size_t minAlnLength, double minAlnIdentity, int numThreads, std::string tempAlnFileName)
 {
 	std::vector<Alignment> result;
 	std::vector<Path> reversePaths;
@@ -492,6 +493,31 @@ std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mis
 			crossesNode[node.id].push_back(i);
 		}
 	}
+	moodycamel::ConcurrentQueue<std::shared_ptr<std::vector<char>>> writequeue;
+	std::atomic<bool> overlapsFinished;
+	overlapsFinished = false;
+	std::thread overlapWriter { [tempAlnFileName, &overlapsFinished, &writequeue](){
+		std::ofstream outfile { tempAlnFileName, std::ios::out | std::ios::binary };
+		while (true)
+		{
+			std::shared_ptr<std::vector<char>> alns[100] {};
+			size_t gotOverlaps = writequeue.try_dequeue_bulk(alns, 100);
+			if (gotOverlaps == 0)
+			{
+				if (!writequeue.try_dequeue(alns[0]))
+				{
+					if (overlapsFinished) break;
+					std::this_thread::sleep_for(std::chrono::milliseconds(10));
+					continue;
+				}
+				gotOverlaps = 1;
+			}
+			for (size_t i = 0; i < gotOverlaps; i++)
+			{
+				outfile.write(alns[i]->data(), alns[i]->size());
+			}
+		}
+	}};
 	std::vector<std::vector<Alignment>> resultsPerThread;
 	resultsPerThread.resize(numThreads);
 	std::vector<std::thread> threads;
@@ -499,7 +525,7 @@ std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mis
 	size_t nextRead = 0;
 	for (size_t thread = 0; thread < numThreads; thread++)
 	{
-		threads.emplace_back([&paths, &nextRead, &nextReadMutex, &resultsPerThread, thread, &crossesNode, minAlnIdentity, minAlnLength, mismatchPenalty, &reversePaths]()
+		threads.emplace_back([&writequeue, &paths, &nextRead, &nextReadMutex, &resultsPerThread, thread, &crossesNode, minAlnIdentity, minAlnLength, mismatchPenalty, &reversePaths]()
 		{
 			while (true)
 			{
@@ -538,11 +564,30 @@ std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mis
 					}
 					if (fwAln.alignmentLength >= minAlnLength && fwAln.alignmentIdentity >= minAlnIdentity)
 					{
+						std::shared_ptr<std::vector<char>> overlaps { new std::vector<char> };
+						overlaps->resize(fwAln.alignedPairs.size() * 10 + 12);
+						uint32_t leftPath = fwAln.leftPath;
+						uint32_t rightPath = fwAln.rightPath;
+						uint32_t overlapSize = fwAln.alignedPairs.size();
+						memcpy(overlaps->data(), &leftPath, 4);
+						memcpy(overlaps->data()+4, &rightPath, 4);
+						memcpy(overlaps->data()+8, &overlapSize, 4);
 						for (size_t i = 0; i < fwAln.alignedPairs.size(); i++)
 						{
 							fwAln.alignedPairs[i].leftReverse = false;
 							fwAln.alignedPairs[i].rightReverse = false;
+							uint32_t leftIndex = fwAln.alignedPairs[i].leftIndex;
+							uint32_t rightIndex = fwAln.alignedPairs[i].rightIndex;
+							char leftReverse = fwAln.alignedPairs[i].leftReverse;
+							char rightReverse = fwAln.alignedPairs[i].rightReverse;
+							memcpy(overlaps->data()+12+i*10, &leftIndex, 4);
+							memcpy(overlaps->data()+12+i*10+4, &rightIndex, 4);
+							memcpy(overlaps->data()+12+i*10+8, &leftReverse, 1);
+							memcpy(overlaps->data()+12+i*10+9, &rightReverse, 1);
 						}
+						writequeue.enqueue(overlaps);
+						decltype(fwAln.alignedPairs) tmp;
+						std::swap(tmp, fwAln.alignedPairs);
 						fwAln.rightReverse = false;
 						resultsPerThread[thread].push_back(fwAln);
 					}
@@ -557,6 +602,14 @@ std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mis
 					}
 					if (bwAln.alignmentLength >= minAlnLength && bwAln.alignmentIdentity >= minAlnIdentity)
 					{
+						std::shared_ptr<std::vector<char>> overlaps { new std::vector<char> };
+						overlaps->resize(bwAln.alignedPairs.size() * 10 + 12);
+						uint32_t leftPath = bwAln.leftPath;
+						uint32_t rightPath = bwAln.rightPath;
+						uint32_t overlapSize = bwAln.alignedPairs.size();
+						memcpy(overlaps->data(), &leftPath, 4);
+						memcpy(overlaps->data()+4, &rightPath, 4);
+						memcpy(overlaps->data()+8, &overlapSize, 4);
 						bwAln.rightStart = paths[j].position.size() - 1 - bwAln.rightStart;
 						bwAln.rightEnd = paths[j].position.size() - 1 - bwAln.rightEnd;
 						std::swap(bwAln.rightStart, bwAln.rightEnd);
@@ -565,7 +618,18 @@ std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mis
 							bwAln.alignedPairs[i].leftReverse = false;
 							bwAln.alignedPairs[i].rightReverse = true;
 							bwAln.alignedPairs[i].rightIndex = paths[j].position.size() - 1 - bwAln.alignedPairs[i].rightIndex;
+							uint32_t leftIndex = bwAln.alignedPairs[i].leftIndex;
+							uint32_t rightIndex = bwAln.alignedPairs[i].rightIndex;
+							char leftReverse = bwAln.alignedPairs[i].leftReverse;
+							char rightReverse = bwAln.alignedPairs[i].rightReverse;
+							memcpy(overlaps->data()+12+i*10, &leftIndex, 4);
+							memcpy(overlaps->data()+12+i*10+4, &rightIndex, 4);
+							memcpy(overlaps->data()+12+i*10+8, &leftReverse, 1);
+							memcpy(overlaps->data()+12+i*10+9, &rightReverse, 1);
 						}
+						writequeue.enqueue(overlaps);
+						decltype(bwAln.alignedPairs) tmp;
+						std::swap(tmp, bwAln.alignedPairs);
 						bwAln.rightReverse = true;
 						resultsPerThread[thread].push_back(bwAln);
 					}
@@ -578,6 +642,8 @@ std::vector<Alignment> induceOverlaps(const std::vector<Path>& paths, double mis
 		threads[i].join();
 		result.insert(result.end(), resultsPerThread[i].begin(), resultsPerThread[i].end());
 	}
+	overlapsFinished = true;
+	overlapWriter.join();
 	std::cerr << result.size() << " induced alignments" << std::endl;
 	return result;
 }
@@ -623,7 +689,7 @@ void set(Oriented2dVector<std::pair<size_t, NodePos>>& parent, std::pair<size_t,
 	parent[found] = find(parent, target);
 }
 
-TransitiveClosureMapping getTransitiveClosures(const std::vector<Path>& paths, const std::vector<Alignment>& alns)
+TransitiveClosureMapping getTransitiveClosures(const std::vector<Path>& paths, const std::set<std::pair<size_t, size_t>>& pickedAlns, std::string overlapFile)
 {
 	TransitiveClosureMapping result;
 	Oriented2dVector<std::pair<size_t, NodePos>> parent;
@@ -637,16 +703,34 @@ TransitiveClosureMapping getTransitiveClosures(const std::vector<Path>& paths, c
 			parent[std::pair<size_t, NodePos> { i, NodePos { j, false } }] = std::pair<size_t, NodePos> { i, NodePos { j, false } };
 		}
 	}
-	for (auto aln : alns)
 	{
-		for (auto pair : aln.alignedPairs)
+		std::ifstream file { overlapFile, std::ios::in | std::ios::binary };
+		while (file.good())
 		{
-			std::pair<size_t, NodePos> leftKey { aln.leftPath, NodePos { pair.leftIndex, pair.leftReverse } };
-			std::pair<size_t, NodePos> rightKey { aln.rightPath, NodePos { pair.rightIndex, pair.rightReverse } };
-			set(parent, leftKey, rightKey);
-			std::pair<size_t, NodePos> revLeftKey { aln.leftPath, NodePos { pair.leftIndex, !pair.leftReverse } };
-			std::pair<size_t, NodePos> revRightKey { aln.rightPath, NodePos { pair.rightIndex, !pair.rightReverse } };
-			set(parent, revLeftKey, revRightKey);
+			uint32_t leftPath = 0, rightPath = 0, overlapSize = 0;
+			file.read((char*)&leftPath, 4);
+			file.read((char*)&rightPath, 4);
+			file.read((char*)&overlapSize, 4);
+			if (!file.good()) break;
+			bool picked = pickedAlns.count(std::pair<size_t, size_t>{leftPath, rightPath}) == 1;
+			for (size_t i = 0; i < overlapSize; i++)
+			{
+				uint32_t leftIndex, rightIndex;
+				char leftReverse, rightReverse;
+				file.read((char*)&leftIndex, 4);
+				file.read((char*)&rightIndex, 4);
+				file.read((char*)&leftReverse, 1);
+				file.read((char*)&rightReverse, 1);
+				if (picked)
+				{
+					std::pair<size_t, NodePos> leftKey { leftPath, NodePos { (size_t)leftIndex, (bool)leftReverse } };
+					std::pair<size_t, NodePos> rightKey { rightPath, NodePos { (size_t)rightIndex, (bool)rightReverse } };
+					set(parent, leftKey, rightKey);
+					std::pair<size_t, NodePos> revLeftKey { leftPath, NodePos { (size_t)leftIndex, !(bool)leftReverse } };
+					std::pair<size_t, NodePos> revRightKey { rightPath, NodePos { (size_t)rightIndex, !(bool)rightReverse } };
+					set(parent, revLeftKey, revRightKey);
+				}
+			}
 		}
 	}
 	std::map<std::pair<size_t, NodePos>, size_t> closureNumber;
@@ -849,7 +933,7 @@ std::vector<Alignment> pickLowestErrorPerRead(const std::vector<Path>& paths, co
 	return result;
 }
 
-std::vector<Alignment> pickLongestPerRead(const std::vector<Path>& paths, const std::vector<Alignment>& alns, size_t maxNum)
+std::set<std::pair<size_t, size_t>> pickLongestPerRead(const std::vector<Path>& paths, const std::vector<Alignment>& alns, size_t maxNum)
 {
 	std::vector<std::vector<size_t>> leftAlnsPerRead;
 	std::vector<std::vector<size_t>> rightAlnsPerRead;
@@ -882,12 +966,12 @@ std::vector<Alignment> pickLongestPerRead(const std::vector<Path>& paths, const 
 			picked[index] += 1;
 		}
 	}
-	std::vector<Alignment> result;
+	std::set<std::pair<size_t, size_t>> result;
 	for (size_t i = 0; i < alns.size(); i++)
 	{
 		assert(picked[i] >= 0);
 		assert(picked[i] <= 2);
-		if (picked[i] == 2) result.push_back(alns[i]);
+		if (picked[i] == 2) result.emplace(alns[i].leftPath, alns[i].rightPath);
 	}
 	std::cerr << result.size() << " alignments after picking longest" << std::endl;
 	return result;
@@ -1296,11 +1380,11 @@ int main(int argc, char** argv)
 	std::cerr << "filter paths on length" << std::endl;
 	paths = filterByLength(paths, 1000);
 	std::cerr << "induce overlaps" << std::endl;
-	auto alns = induceOverlaps(paths, mismatchPenalty, minAlnLength, minAlnIdentity, numThreads);
+	auto alns = induceOverlaps(paths, mismatchPenalty, minAlnLength, minAlnIdentity, numThreads, "overlaps.tmp");
 	// std::cerr << "remove non-dovetail alignments" << std::endl;
 	// alns = removeNonDovetails(paths, alns);
 	std::cerr << "pick longest alignments" << std::endl;
-	alns = pickLongestPerRead(paths, alns, maxAlnCount);
+	auto pickedAlns = pickLongestPerRead(paths, alns, maxAlnCount);
 	// std::cerr << "double alignments" << std::endl;
 	// alns = doubleAlignments(alns);
 	// std::cerr << "remove contained alignments" << std::endl;
@@ -1313,12 +1397,17 @@ int main(int argc, char** argv)
 	// alns = pickLowestErrorPerRead(paths, alns, 3);
 	// std::cerr << "double alignments" << std::endl;
 	// alns = doubleAlignments(alns);
-	std::cerr << "get transitive closure" << std::endl;
-	auto transitiveClosures = getTransitiveClosures(paths, alns);
 	std::cerr << "deallocate alignments" << std::endl;
 	{
 		decltype(alns) tmp;
 		std::swap(alns, tmp);
+	}
+	std::cerr << "get transitive closure" << std::endl;
+	auto transitiveClosures = getTransitiveClosures(paths, pickedAlns, "overlaps.tmp");
+	std::cerr << "deallocate picked" << std::endl;
+	{
+		decltype(pickedAlns) tmp;
+		std::swap(pickedAlns, tmp);
 	}
 	std::cerr << "merge double strands" << std::endl;
 	auto doubleStrandedClosures = mergeDoublestrandClosures(paths, transitiveClosures);
