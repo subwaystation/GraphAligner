@@ -13,6 +13,7 @@ def revcomp(s):
 
 graph = Graph()
 graph.load(infile)
+graph.remove_nonexistent_edges()
 
 unitig_mapping = {}
 result = Graph()

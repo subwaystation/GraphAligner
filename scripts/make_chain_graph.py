@@ -11,6 +11,7 @@ outchains = sys.argv[4]
 
 graph = Graph()
 graph.load(ingraph)
+graph.remove_nonexistent_edges()
 
 with open(insnarlstraversals) as f:
 	travs = json.load(f)

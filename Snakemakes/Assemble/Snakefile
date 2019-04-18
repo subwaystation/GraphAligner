@@ -23,9 +23,12 @@ MINOVERLAPIDENTITY = config["MinOverlapIdentity"]
 SHORTREADNAMES = [n.split('.')[0] for n in SHORTREADS]
 SHORTREADEXTENSIONS = ['.'.join(n.split('.')[1:]) for n in SHORTREADS]
 
+wildcard_constraints:
+	graph = "assembly((-unitig)|(-untip)|(-topo)|(-withchains)|(-repeat)|(-cycle))*"
+
 rule all:
 	input:
-		OUTDIR + "assembly_withchains.gfa",
+		OUTDIR + "assembly.gfa",
 		OUTDIR + "chains.gfa",
 		OUTDIR + "nodeinfo_assembly.csv",
 		OUTDIR + "nodeinfo_chains.csv"
@@ -92,8 +95,8 @@ rule initial_assembly:
 		graph = TMPDIR + "graph.gfa",
 		alignments = rules.align_reads.output
 	output:
-		assembly = temp(TMPDIR + "assembly.gfa"),
-		translatedreads = temp(TMPDIR + "alns-translated.gam")
+		assembly = TMPDIR + "assembly.gfa",
+		translatedreads = TMPDIR + "alns-translated.gam"
 	threads: 40
 	log:
 		stdout = TMPDIR + "assemble_stdout.txt",
@@ -101,79 +104,78 @@ rule initial_assembly:
 	shell:
 		"/usr/bin/time -v {ALIGNERBINDIR}AssembleByAlignment {input.graph} {input.alignments} {output.assembly} {output.translatedreads} {MINOVERLAPLENGTH} {MINOVERLAPIDENTITY} {MAXOVERLAPCOUNT} {threads} 1> {log.stdout} 2> {log.stderr}"
 
-rule unitigify_1:
-	input: rules.initial_assembly.output.assembly
+rule unitigify:
+	input: TMPDIR + "{graph}.gfa"
 	output:
-		graph = temp(TMPDIR + "assembly-unitig.gfa"),
-		translation = temp(TMPDIR + "translation-unitig.txt")
+		graph = temp(TMPDIR + "{graph}-unitig.gfa"),
+		translation = temp(TMPDIR + "{graph}-unitig-translation.txt")
 	shell: "{ALIGNERSCRIPTDIR}unitigify_assembly.py {input} {output.graph} {output.translation}"
 
 rule untip:
-	input: rules.unitigify_1.output.graph
-	output: temp(TMPDIR + "assembly-unitig-untip.gfa")
+	input: TMPDIR + "{graph}.gfa"
+	output: temp(TMPDIR + "{graph}-untip.gfa")
 	shell: "{ALIGNERBINDIR}UntipRelative 1000 2000 0.01 < {input} > {output}"
-
-rule unitigify_2:
-	input: rules.untip.output
-	output:
-		graph = temp(TMPDIR + "assembly-unitig-untip-unitig.gfa"),
-		translation = temp(TMPDIR + "translation-unitig-untip-unitig.txt")
-	shell: "{ALIGNERSCRIPTDIR}unitigify_assembly.py {input} {output.graph} {output.translation}"
-
-rule resolve_short_repeats:
-	input: rules.unitigify_2.output.graph
-	output: temp(TMPDIR + "assembly-unitigs-untip-unitig-repeat.gfa")
-	shell: "{ALIGNERSCRIPTDIR}resolve_short_repeats.py {input} {output}"
-
-rule untip_2:
-	input: rules.resolve_short_repeats.output
-	output: temp(TMPDIR + "assembly-unitigs-untip-unitig-repeat-untip.gfa")
-	shell: "{ALIGNERBINDIR}UntipRelative 1000 2000 0.01 < {input} > {output}"
-
-rule unitigify_3:
-	input: rules.untip_2.output
-	output:
-		graph = temp(TMPDIR + "assembly-unitigs-untip-unitig-repeat-untip-unitig.gfa"),
-		translation = temp(TMPDIR + "translation-unitigs-untip-unitig-repeat-untip-unitig.txt")
-	shell: "{ALIGNERSCRIPTDIR}unitigify_assembly.py {input} {output.graph} {output.translation}"
 
 rule topofy:
-	input: rules.unitigify_3.output.graph
-	output: temp(TMPDIR + "topo.gfa")
-	shell: "{ALIGNERSCRIPTDIR}filter_unconnected_nodes.py {input} {output}"
-
-rule remove_overlap_and_vgfy:
-	input: rules.topofy.output
-	output: temp(TMPDIR + "topo.vg")
-	shell: "sed 's/[0-9]\\+M/0M/g' < {input} | {VGPATH} view -Fv - > {output}"
+	input: TMPDIR + "{graph}.gfa"
+	output: temp(TMPDIR + "{graph}-topo.vg")
+	shell: "{ALIGNERSCRIPTDIR}filter_unconnected_nodes.py {input} /dev/stdout | sed 's/[0-9]\\+M/0M/g' | {VGPATH} view -Fv - > {output}"
 
 rule snarls:
-	input: rules.remove_overlap_and_vgfy.output
-	output:
-		snarls = temp(TMPDIR + "snarls.pb"),
-		traversals = temp(TMPDIR + "traversals.travs")
-	shell: "{VGPATH} snarls -r {output.traversals} -m 1000 {input} > {output.snarls}"
+	input: TMPDIR + "{graph}-topo.vg"
+	output: temp(TMPDIR + "{graph}-traversals.travs")
+	shell: "{VGPATH} snarls -r {output} -m 1000 {input} > /dev/null"
 
 rule fix_traversals:
-	input: rules.snarls.output.traversals
-	output: temp(TMPDIR + "viewtraversals.json")
+	input: TMPDIR + "{graph}-traversals.travs"
+	output: temp(TMPDIR + "{graph}-traversals.json")
 	shell: "{VGPATH} view -E {input} | sed 's/$/,/g' | sed '1 s/^/[/g' | sed '$ s/,$/]/g' > {output}"
 
 rule make_chains:
 	input:
-		graph = rules.unitigify_3.output.graph,
-		traversals = rules.fix_traversals.output
+		graph = TMPDIR + "{graph}.gfa",
+		traversals = TMPDIR + "{graph}-traversals.json"
 	output:
-		graph_withchains = OUTDIR + "assembly_withchains.gfa",
-		chains = OUTDIR + "chains.gfa"
+		graph_withchains = temp(TMPDIR + "{graph}-withchains.gfa"),
+		chains = temp(TMPDIR + "{graph}-chains.gfa")
 	shell: "{ALIGNERSCRIPTDIR}make_chain_graph.py {input.graph} {input.traversals} {output.graph_withchains} {output.chains}"
 
+rule resolve_small_cycles:
+	input: TMPDIR + "{graph}.gfa",
+	output: temp(TMPDIR + "{graph}-cycle.gfa")
+	shell: "{ALIGNERSCRIPTDIR}resolve_short_repeats.py {input} {output}"
+
+rule translate_1:
+	input:
+		alns = rules.initial_assembly.output.translatedreads,
+		translation = TMPDIR + "assembly-untip-unitig-translation.txt"
+	output: temp(TMPDIR + "translated-1.gam")
+	shell: "{ALIGNERBINDIR}TranslatePath {input.alns} {input.translation} {output}"
+
+rule resolve_small_tangles:
+	input:
+		graph = TMPDIR + "assembly-untip-unitig-withchains.gfa",
+		alns = TMPDIR + "translated-1.gam"
+	output: temp(TMPDIR + "assembly-untip-unitig-repeat.gfa")
+	shell: "{ALIGNERBINDIR}ResolveSmallTangles {input.graph} {input.alns} 5000 {output} /dev/null"
+
+rule final:
+	input:
+		graph_withchains = TMPDIR + "assembly-untip-unitig-repeat-unitig-cycle-unitig-withchains.gfa",
+		graph_chains = TMPDIR + "assembly-untip-unitig-repeat-unitig-cycle-unitig-chains.gfa"
+	output:
+		graph_withchains = OUTDIR + "assembly.gfa",
+		graph_chains = OUTDIR + "chains.gfa"
+	run:
+		shell("cp {input.graph_withchains} {output.graph_withchains}"),
+		shell("cp {input.graph_chains} {output.graph_chains}")
+
 rule nodeinfo_assembly:
-	input: rules.make_chains.output.graph_withchains
+	input: rules.final.output.graph_withchains
 	output: OUTDIR + "nodeinfo_assembly.csv"
 	shell: "{ALIGNERSCRIPTDIR}graph_infocsv.py < {input} > {output}"
 
 rule nodeinfo_chains:
-	input: rules.make_chains.output.chains
+	input: rules.final.output.graph_chains
 	output: OUTDIR + "nodeinfo_chains.csv"
 	shell: "{ALIGNERSCRIPTDIR}graph_infocsv.py < {input} > {output}"

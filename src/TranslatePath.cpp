@@ -15,17 +15,22 @@ vg::Alignment translate(const vg::Alignment& input, const Mapping& mapping)
 	vg::Alignment result;
 	result.set_name(input.name());
 	auto vgmapping = result.mutable_path()->add_mapping();
-	auto translated = mapping.nodeMapping.at(input.path().mapping(0).position().node_id());
-	if (input.path().mapping(0).position().is_reverse()) translated = translated.Reverse();
+	int start = 0;
+	NodePos translated;
+	while (start < input.path().mapping_size() && mapping.nodeMapping.count(input.path().mapping(start).position().node_id()) == 0) start++;
+	if (start == input.path().mapping_size()) return result;
+	translated = mapping.nodeMapping.at(input.path().mapping(start).position().node_id());
+	if (input.path().mapping(start).position().is_reverse()) translated = translated.Reverse();
 	vgmapping->mutable_position()->set_node_id(translated.id);
 	vgmapping->mutable_position()->set_is_reverse(!translated.end);
-	for (int i = 1; i < input.path().mapping_size(); i++)
+	for (int i = start+1; i < input.path().mapping_size(); i++)
 	{
 		NodePos oldPos, newPos;
 		oldPos.id = input.path().mapping(i-1).position().node_id();
 		oldPos.end = !input.path().mapping(i-1).position().is_reverse();
 		newPos.id = input.path().mapping(i).position().node_id();
 		newPos.end = !input.path().mapping(i).position().is_reverse();
+		if (mapping.nodeMapping.count(input.path().mapping(i).position().node_id()) == 0) continue;
 		auto newTranslated = mapping.nodeMapping.at(input.path().mapping(i).position().node_id());
 		if (input.path().mapping(i).position().is_reverse()) newTranslated = newTranslated.Reverse();
 		if (mapping.keptEdges.count(std::make_pair(oldPos, newPos)) == 1 || mapping.keptEdges.count(std::make_pair(newPos, oldPos)) == 1)
@@ -93,6 +98,7 @@ int main(int argc, char** argv)
 	std::function<void(vg::Alignment&)> lambda = [&alignmentOut, &mapping](vg::Alignment& g) {
 		std::vector<vg::Alignment> translated;
 		translated.push_back(translate(g, mapping));
+		if (translated.back().path().mapping_size() == 0) translated.pop_back();
 		stream::write_buffered(alignmentOut, translated, 0);
 	};
 	stream::for_each(input, lambda);

@@ -70,9 +70,10 @@ class Graph:
 		with open(filename, 'w') as f:
 			for node in self.nodes:
 				n = self.nodes[node]
-				line = "S\t" + str(n.nodeid) + "\t" + n.nodeseq + "\tLN:i:" + str(n.length) + '\tRC:i:' + str(n.readcount) + '\tkm:f:' + str(float(n.readcount)/float(n.length))
-				if n.chain:
-					line += "\tbc:Z:" + str(n.chain)
+				line = "S\t" + str(n.nodeid) + "\t" + n.nodeseq + "\tLN:i:" + str(n.length)
+				if n.readcount: line += '\tRC:i:' + str(n.readcount)
+				if n.length: line += '\tkm:f:' + str(float(n.readcount)/float(n.length))
+				if n.chain: line += "\tbc:Z:" + str(n.chain)
 				f.write(line + '\n')
 			for edge in self.edges:
 				for target in self.edges[edge]:
