@@ -295,12 +295,6 @@ Alignment align(const std::vector<NodePos>& leftPath, const std::vector<NodePos>
 
 void induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size_t minAlnLength, double minAlnIdentity, int numThreads, std::string tempAlnFileName)
 {
-	std::vector<Path> reversePaths;
-	reversePaths.reserve(paths.size());
-	for (size_t i = 0; i < paths.size(); i++)
-	{
-		reversePaths.push_back(paths[i].Reverse());
-	}
 	std::unordered_map<size_t, std::vector<size_t>> crossesNode;
 	for (size_t i = 0; i < paths.size(); i++)
 	{
@@ -341,7 +335,7 @@ void induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size
 	size_t nextRead = 0;
 	for (size_t thread = 0; thread < numThreads; thread++)
 	{
-		threads.emplace_back([&writequeue, &paths, &nextRead, &nextReadMutex, thread, &crossesNode, minAlnIdentity, minAlnLength, mismatchPenalty, &reversePaths]()
+		threads.emplace_back([&writequeue, &paths, &nextRead, &nextReadMutex, thread, &crossesNode, minAlnIdentity, minAlnLength, mismatchPenalty]()
 		{
 			while (true)
 			{
@@ -364,6 +358,7 @@ void induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size
 						possibleMatches[other] += nodeSize;
 					}
 				}
+				auto reversePath = paths[i].Reverse();
 				for (auto pair : possibleMatches)
 				{
 					size_t j = pair.first;
@@ -372,18 +367,18 @@ void induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size
 					Alignment fwAln;
 					if (pair.second > paths[i].cumulativePrefixLength.back() || pair.second > paths[j].cumulativePrefixLength.back())
 					{
-						fwAln = align(paths[i].position, paths[j].position, paths[i].nodeSize, paths[j].nodeSize, i, j, mismatchPenalty);
+						fwAln = align(paths[j].position, paths[i].position, paths[j].nodeSize, paths[i].nodeSize, j, i, mismatchPenalty);
 					}
 					else
 					{
-						fwAln = alignSparse(paths[i], paths[j], i, j, mismatchPenalty);
+						fwAln = alignSparse(paths[j], paths[i], j, i, mismatchPenalty);
 					}
 					if (fwAln.alignmentLength >= minAlnLength && fwAln.alignmentIdentity >= minAlnIdentity)
 					{
-						for (size_t i = 0; i < fwAln.alignedPairs.size(); i++)
+						for (size_t k = 0; k < fwAln.alignedPairs.size(); k++)
 						{
-							fwAln.alignedPairs[i].leftReverse = false;
-							fwAln.alignedPairs[i].rightReverse = false;
+							fwAln.alignedPairs[k].leftReverse = false;
+							fwAln.alignedPairs[k].rightReverse = false;
 						}
 						fwAln.rightReverse = false;
 						writequeue.enqueue(fwAln);
@@ -391,22 +386,22 @@ void induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size
 					Alignment bwAln;
 					if (pair.second > paths[i].cumulativePrefixLength.back() || pair.second > paths[j].cumulativePrefixLength.back())
 					{
-						bwAln = align(paths[i].position, reversePaths[j].position, paths[i].nodeSize, reversePaths[j].nodeSize, i, j, mismatchPenalty);
+						bwAln = align(paths[j].position, reversePath.position, paths[j].nodeSize, reversePath.nodeSize, j, i, mismatchPenalty);
 					}
 					else
 					{
-						bwAln = alignSparse(paths[i], reversePaths[j], i, j, mismatchPenalty);
+						bwAln = alignSparse(paths[j], reversePath, j, i, mismatchPenalty);
 					}
 					if (bwAln.alignmentLength >= minAlnLength && bwAln.alignmentIdentity >= minAlnIdentity)
 					{
-						bwAln.rightStart = paths[j].position.size() - 1 - bwAln.rightStart;
-						bwAln.rightEnd = paths[j].position.size() - 1 - bwAln.rightEnd;
+						bwAln.rightStart = paths[i].position.size() - 1 - bwAln.rightStart;
+						bwAln.rightEnd = paths[i].position.size() - 1 - bwAln.rightEnd;
 						std::swap(bwAln.rightStart, bwAln.rightEnd);
-						for (size_t i = 0; i < bwAln.alignedPairs.size(); i++)
+						for (size_t k = 0; k < bwAln.alignedPairs.size(); k++)
 						{
-							bwAln.alignedPairs[i].leftReverse = false;
-							bwAln.alignedPairs[i].rightReverse = true;
-							bwAln.alignedPairs[i].rightIndex = paths[j].position.size() - 1 - bwAln.alignedPairs[i].rightIndex;
+							bwAln.alignedPairs[k].leftReverse = false;
+							bwAln.alignedPairs[k].rightReverse = true;
+							bwAln.alignedPairs[k].rightIndex = paths[i].position.size() - 1 - bwAln.alignedPairs[k].rightIndex;
 						}
 						bwAln.rightReverse = true;
 						writequeue.enqueue(bwAln);
