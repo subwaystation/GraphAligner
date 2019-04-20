@@ -4,9 +4,42 @@
 #include <iostream>
 #include "Assemble.h"
 
+template <typename F>
+void iterateMostRecentAncestors(std::unordered_set<size_t>& tips, const std::vector<std::vector<size_t>>& inNeighbors, F f)
+{
+	std::unordered_set<size_t> visited;
+	std::vector<size_t> visitStack;
+	for (auto tip : tips)
+	{
+		if (!f(tip))
+		{
+			for (auto neighbor : inNeighbors[tip])
+			{
+				visitStack.push_back(neighbor);
+			}
+		}
+	}
+	while (visitStack.size() > 0)
+	{
+		size_t k = visitStack.back();
+		visitStack.pop_back();
+		if (visited.count(k) == 1) return;
+		visited.insert(k);
+		if (!f(k))
+		{
+			for (auto neighbor : inNeighbors[k])
+			{
+				visitStack.push_back(neighbor);
+			}
+		}
+	}
+}
+
 Alignment alignSparse(const Path& leftPath, const Path& rightPath, size_t left, size_t right, double mismatchPenalty)
 {
 	std::vector<std::tuple<size_t, size_t, double, size_t>> trace;
+	std::unordered_set<size_t> tips;
+	std::vector<std::vector<size_t>> inNeighbors;
 	size_t bestTraceStart = -1;
 	double bestStartScore = 0;
 	for (size_t i = 0; i < leftPath.position.size(); i++)
@@ -15,27 +48,37 @@ Alignment alignSparse(const Path& leftPath, const Path& rightPath, size_t left, 
 		{
 			for (auto j : rightPath.occurrences.at(leftPath.position[i]))
 			{
+				size_t index = trace.size();
+				tips.insert(index);
+				inNeighbors.emplace_back();
 				trace.emplace_back(i, j, 0, (size_t)-1);
 				std::get<2>(trace.back()) = -(double)std::min(leftPath.cumulativePrefixLength[i], rightPath.cumulativePrefixLength[j]) * mismatchPenalty;
 				assert(std::get<2>(trace.back()) < leftPath.cumulativePrefixLength.back() && std::get<2>(trace.back()) < rightPath.cumulativePrefixLength.back());
 				assert(std::get<2>(trace.back()) > -(double)leftPath.cumulativePrefixLength.back() * mismatchPenalty || std::get<2>(trace.back()) > -(double)rightPath.cumulativePrefixLength.back() * mismatchPenalty);
-				for (size_t k = 0; k < trace.size()-1; k++)
+				std::vector<size_t> removedTips;
+				iterateMostRecentAncestors(tips, inNeighbors, [mismatchPenalty, &leftPath, &rightPath, &trace, &inNeighbors, &removedTips, i, j, index](size_t k)
 				{
-					if (std::get<0>(trace[k]) < i && std::get<1>(trace[k]) < j)
+					if (k == index) return false;
+					if (std::get<0>(trace[k]) >= i || std::get<1>(trace[k]) >= j) return false;
+					removedTips.push_back(k);
+					inNeighbors[index].push_back(k);
+					double insertions = leftPath.cumulativePrefixLength[i] - leftPath.cumulativePrefixLength[std::get<0>(trace[k])+1];
+					double deletions = rightPath.cumulativePrefixLength[j] - rightPath.cumulativePrefixLength[std::get<1>(trace[k])+1];
+					assert(insertions >= 0);
+					assert(deletions >= 0);
+					assert(insertions <= leftPath.cumulativePrefixLength.back());
+					assert(deletions <= rightPath.cumulativePrefixLength.back());
+					double btScore = std::get<2>(trace[k]) - std::max(insertions, deletions) * mismatchPenalty;
+					if (btScore > std::get<2>(trace.back()))
 					{
-						double insertions = leftPath.cumulativePrefixLength[i] - leftPath.cumulativePrefixLength[std::get<0>(trace[k])+1];
-						double deletions = rightPath.cumulativePrefixLength[j] - rightPath.cumulativePrefixLength[std::get<1>(trace[k])+1];
-						assert(insertions >= 0);
-						assert(deletions >= 0);
-						assert(insertions <= leftPath.cumulativePrefixLength.back());
-						assert(deletions <= rightPath.cumulativePrefixLength.back());
-						double btScore = std::get<2>(trace[k]) - std::max(insertions, deletions) * mismatchPenalty;
-						if (btScore > std::get<2>(trace.back()))
-						{
-							std::get<2>(trace.back()) = btScore;
-							std::get<3>(trace.back()) = k;
-						}
+						std::get<2>(trace.back()) = btScore;
+						std::get<3>(trace.back()) = k;
 					}
+					return true;
+				});
+				for (auto k : removedTips)
+				{
+					tips.erase(k);
 				}
 				assert(leftPath.position[i] == rightPath.position[j]);
 				std::get<2>(trace.back()) += leftPath.nodeSize[i];

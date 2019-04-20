@@ -107,6 +107,16 @@ for n in graph.nodes:
 		if not edge_exists: add_end(find(n), bwpos)
 
 for c in chains.nodes:
+	if (c in chain_start) and (c in chain_end): continue
+	assert c not in chain_start
+	assert c not in chain_end
+	# circular chain
+	chains.edges[(c, True)] = set()
+	chains.edges[(c, True)].add(((c, True), (0, None)))
+	chain_start[c] = (-1, True)
+	chain_end[c] = (-1, True)
+
+for c in chains.nodes:
 	assert c in chain_start
 	assert c in chain_end
 
