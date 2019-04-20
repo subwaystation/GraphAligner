@@ -90,10 +90,24 @@ rule align_reads:
 	shell:
 		"/usr/bin/time -v {ALIGNERBINDIR}GraphAligner -g {input.graph} -a {output} -f {params.readconcat} -t {threads} 1> {log.stdout} 2> {log.stderr}"
 
-rule initial_assembly:
+rule induce_overlaps:
 	input:
 		graph = TMPDIR + "graph.gfa",
 		alignments = rules.align_reads.output
+	output:
+		overlaps = TMPDIR + "overlaps.tmp"
+	threads: 40
+	log:
+		stdout = TMPDIR + "overlap_stdout.txt",
+		stderr = TMPDIR + "overlap_stderr.txt"
+	shell:
+		"/usr/bin/time -v {ALIGNERBINDIR}InduceOverlaps {input.graph} {input.alignments} {MINOVERLAPLENGTH} {MINOVERLAPIDENTITY} {threads} {output} 1> {log.stdout} 2> {log.stderr}"
+
+rule initial_assembly:
+	input:
+		graph = TMPDIR + "graph.gfa",
+		alignments = rules.align_reads.output,
+		overlaps = rules.induce_overlaps.output
 	output:
 		assembly = TMPDIR + "assembly.gfa",
 		translatedreads = TMPDIR + "alns-translated.gam"
@@ -102,7 +116,7 @@ rule initial_assembly:
 		stdout = TMPDIR + "assemble_stdout.txt",
 		stderr = TMPDIR + "assemble_stderr.txt"
 	shell:
-		"/usr/bin/time -v {ALIGNERBINDIR}AssembleByAlignment {input.graph} {input.alignments} {output.assembly} {output.translatedreads} {MINOVERLAPLENGTH} {MINOVERLAPIDENTITY} {MAXOVERLAPCOUNT} {threads} 1> {log.stdout} 2> {log.stderr}"
+		"/usr/bin/time -v {ALIGNERBINDIR}AssembleByAlignment {input.graph} {input.alignments} {input.overlaps} {output.assembly} {output.translatedreads} {MAXOVERLAPCOUNT} 1> {log.stdout} 2> {log.stderr}"
 
 rule unitigify:
 	input: TMPDIR + "{graph}.gfa"
