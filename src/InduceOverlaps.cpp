@@ -35,7 +35,7 @@ void iterateMostRecentAncestors(std::unordered_set<size_t>& tips, const std::vec
 	}
 }
 
-Alignment align(const std::vector<NodePos>& leftPath, const std::vector<NodePos>& rightPath, const std::vector<size_t>& leftNodeSize, const std::vector<size_t>& rightNodeSize, size_t left, size_t right, double mismatchPenalty)
+Alignment align(const Path& leftPath, const Path& rightPath, size_t left, size_t right, double mismatchPenalty, int diagonalMin, int diagonalMax)
 {
 	enum BacktraceType
 	{
@@ -45,75 +45,104 @@ Alignment align(const std::vector<NodePos>& leftPath, const std::vector<NodePos>
 		Mismatch,
 		Start
 	};
-	static thread_local std::vector<std::vector<double>> DPscores;
-	static thread_local std::vector<std::vector<BacktraceType>> DPtrace;
-	static thread_local std::vector<std::vector<size_t>> matches;
-	if (DPscores.size() < leftPath.size()+1) DPscores.resize(leftPath.size()+1);
-	if (DPtrace.size() < leftPath.size()+1) DPtrace.resize(leftPath.size()+1);
-	if (matches.size() < leftPath.size()+1) matches.resize(leftPath.size()+1);
-	if (DPscores.back().size() < rightPath.size()+1)
+	std::vector<std::vector<double>> DPscores;
+	std::vector<std::vector<BacktraceType>> DPtrace;
+	std::vector<std::vector<size_t>> matches;
+	std::vector<size_t> rowOffset;
+	DPscores.resize(rightPath.position.size());
+	DPtrace.resize(rightPath.position.size());
+	matches.resize(rightPath.position.size());
+	size_t rowStart = 0;
+	size_t rowEnd = 0;
+	size_t maxI = -1;
+	size_t maxJ = -1;
+	for (size_t i = 0; i < rightPath.position.size(); i++)
 	{
-		for (size_t i = 0; i < DPscores.size(); i++)
+		while (rowStart < leftPath.position.size() && (int)leftPath.cumulativePrefixLength[rowStart+1] - (int)rightPath.cumulativePrefixLength[i+1] < diagonalMin)
 		{
-			DPscores[i].resize(rightPath.size()+1, 0);
-			DPtrace[i].resize(rightPath.size()+1, Start);
-			matches[i].resize(rightPath.size()+1, 0);
+			rowStart++;
 		}
-	}
-	size_t maxI = 0;
-	size_t maxJ = 0;
-	for (size_t i = 0; i < leftPath.size(); i++)
-	{
-		for (size_t j = 0; j < rightPath.size(); j++)
+		while (rowEnd < leftPath.position.size() && (int)leftPath.cumulativePrefixLength[rowEnd+1] - (int)rightPath.cumulativePrefixLength[i+1] < diagonalMax)
 		{
-			matches[i+1][j+1] = 0;
-			DPscores[i+1][j+1] = 0;
-			DPtrace[i+1][j+1] = Start;
-			bool match = (leftPath[i] == rightPath[j]);
-			size_t leftSize = leftNodeSize[i];
-			size_t rightSize = rightNodeSize[j];
-			double insertionCost = leftSize * mismatchPenalty;
-			double deletionCost = rightSize * mismatchPenalty;
+			rowEnd++;
+		}
+		assert(rowStart == 0);
+		assert(rowEnd == leftPath.position.size());
+		assert(rowEnd <= leftPath.position.size());
+		DPscores[i].resize(rowEnd - rowStart);
+		DPtrace[i].resize(rowEnd - rowStart);
+		matches[i].resize(rowEnd - rowStart);
+		for (size_t j = 0; j < rowEnd - rowStart; j++)
+		{
+			matches[i][j] = 0;
+			DPscores[i][j] = -((double)leftPath.cumulativePrefixLength.back() + (double)rightPath.cumulativePrefixLength.back()) * mismatchPenalty;
+			DPtrace[i][j] = Start;
+			assert(rowStart+j < leftPath.nodeSize.size());
+			assert(i < rightPath.nodeSize.size());
+			bool match = (leftPath.position[rowStart+j] == rightPath.position[i]);
+			size_t leftSize = leftPath.nodeSize[rowStart+j];
+			size_t rightSize = rightPath.nodeSize[i];
+			double insertionCost = rightSize * mismatchPenalty;
+			double deletionCost = leftSize * mismatchPenalty;
 			double mismatchCost = std::max(insertionCost, deletionCost);
 			double matchScore = leftSize;
 			assert(!match || leftSize == rightSize);
-			// if (DPscores[i][j+1] - insertionCost > DPscores[i+1][j+1])
-			// {
-				DPscores[i+1][j+1] = DPscores[i][j+1] - insertionCost;
-				DPtrace[i+1][j+1] = Insertion;
-				matches[i+1][j+1] = matches[i][j+1];
-			// }
-			if (DPscores[i+1][j] - deletionCost > DPscores[i+1][j+1])
+			if (i == 0 || j+rowStart == 0)
 			{
-				DPscores[i+1][j+1] = DPscores[i+1][j] - deletionCost;
-				DPtrace[i+1][j+1] = Deletion;
-				matches[i+1][j+1] = matches[i+1][j];
+				if (match)
+				{
+					matches[i][j] = matchScore;
+					DPscores[i][j] = matchScore;
+					DPtrace[i][j] = Match;
+				}
+				else
+				{
+					matches[i][j] = 0;
+					DPscores[i][j] = -mismatchCost;
+					DPtrace[i][j] = Mismatch;
+				}
 			}
-			if (match && DPscores[i][j] + matchScore >= DPscores[i+1][j+1])
+			assert(i == 0 || rowStart >= rowOffset.back());
+			size_t previousJ = 0;
+			if (i > 0) previousJ = j + (rowStart - rowOffset.back());
+			if (i > 0 && previousJ < DPscores[i-1].size() && DPscores[i-1][previousJ] - insertionCost > DPscores[i][j])
 			{
-				DPscores[i+1][j+1] = DPscores[i][j] + matchScore;
-				DPtrace[i+1][j+1] = Match;
-				// maxima.erase(std::make_pair(i, j));
-				// maxima.emplace(i+1, j+1);
-				matches[i+1][j+1] = matches[i][j] + matchScore;
+				DPscores[i][j] = DPscores[i-1][previousJ] - insertionCost;
+				DPtrace[i][j] = Insertion;
+				matches[i][j] = matches[i-1][previousJ];
 			}
-			if (!match && DPscores[i][j] - mismatchCost >= DPscores[i+1][j+1])
+			if (j > 0 && DPscores[i][j-1] - deletionCost > DPscores[i][j])
 			{
-				DPscores[i+1][j+1] = DPscores[i][j] - mismatchCost;
-				DPtrace[i+1][j+1] = Mismatch;
-				matches[i+1][j+1] = matches[i][j];
+				DPscores[i][j] = DPscores[i][j-1] - deletionCost;
+				DPtrace[i][j] = Deletion;
+				matches[i][j] = matches[i][j-1];
 			}
-			if ((i == leftPath.size()-1 || j == rightPath.size() - 1) && DPscores[i+1][j+1] >= DPscores[maxI][maxJ])
+			if (i > 0 && previousJ-1 < DPscores[i-1].size() && match && DPscores[i-1][previousJ-1] + matchScore >= DPscores[i][j])
 			{
-				maxI = i+1;
-				maxJ = j+1;
+				DPscores[i][j] = DPscores[i-1][previousJ-1] + matchScore;
+				DPtrace[i][j] = Match;
+				matches[i][j] = matches[i-1][previousJ-1] + matchScore;
 			}
+			if (i > 0 && previousJ-1 < DPscores[i-1].size() && !match && DPscores[i-1][previousJ-1] - mismatchCost >= DPscores[i][j])
+			{
+				DPscores[i][j] = DPscores[i-1][previousJ-1] - mismatchCost;
+				DPtrace[i][j] = Mismatch;
+				matches[i][j] = matches[i-1][previousJ-1];
+			}
+			if ((i == rightPath.position.size()-1 || rowStart+j == leftPath.position.size() - 1) && (maxI == -1 || DPscores[i][j] >= DPscores[maxI][maxJ]))
+			{
+				maxI = i;
+				maxJ = j;
+			}
+			assert(DPtrace[i][j] != Start);
 		}
+		rowOffset.push_back(rowStart);
 	}
 	Alignment result;
-	if (maxI == 0 && maxJ == 0)
+	if (maxI == -1 && maxJ == -1)
 	{
 		result.alignmentIdentity = 0;
+		result.alignmentLength = 0;
 		return result;
 	}
 	size_t matchLen = 0;
@@ -121,45 +150,68 @@ Alignment align(const std::vector<NodePos>& leftPath, const std::vector<NodePos>
 	result.leftPath = left;
 	result.rightPath = right;
 	result.alignmentLength = 0;
-	result.leftEnd = maxI-1;
-	result.rightEnd = maxJ-1;
-	while (DPtrace[maxI][maxJ] != Start)
+	result.leftEnd = rowOffset[maxI] + maxJ;
+	result.rightEnd = maxI;
+	assert(result.leftEnd == leftPath.position.size()-1 || result.rightEnd == rightPath.position.size()-1);
+	bool end = false;
+	while (!end)
 	{
-		assert(maxI > 0);
-		assert(maxJ > 0);
-		size_t leftSize = leftNodeSize[maxI-1];
-		size_t rightSize = rightNodeSize[maxJ-1];
-		result.leftStart = maxI-1;
-		result.rightStart = maxJ-1;
+		assert(maxI < DPscores.size());
+		assert(maxI >= 0);
+		assert(maxJ >= 0);
+		assert(maxJ < DPscores[maxI].size());
+		assert(rowOffset[maxI] + maxJ < leftPath.nodeSize.size());
+		assert(maxI < rightPath.nodeSize.size());
+		size_t leftSize = leftPath.nodeSize[rowOffset[maxI] + maxJ];
+		size_t rightSize = rightPath.nodeSize[maxI];
+		result.leftStart = rowOffset[maxI] + maxJ;
+		result.rightStart = maxI;
 		switch(DPtrace[maxI][maxJ])
 		{
 			case Insertion:
-				mismatchLen += leftSize;
-				maxI -= 1;
-				continue;
-			case Deletion:
 				mismatchLen += rightSize;
+				assert(maxI > 0);
+				maxI -= 1;
+				maxJ += rowOffset[maxI+1] - rowOffset[maxI];
+				break;
+			case Deletion:
+				mismatchLen += leftSize;
+				assert(maxJ > 0);
 				maxJ -= 1;
-				continue;
+				break;
 			case Match:
 				assert(leftSize == rightSize);
 				result.alignedPairs.emplace_back();
-				result.alignedPairs.back().leftIndex = maxI-1;
-				result.alignedPairs.back().rightIndex = maxJ-1;
+				result.alignedPairs.back().leftIndex = rowOffset[maxI] + maxJ;
+				result.alignedPairs.back().rightIndex = maxI;
+				assert(leftPath.position[result.alignedPairs.back().leftIndex] == rightPath.position[result.alignedPairs.back().rightIndex]);
 				matchLen += leftSize;
+				if (maxI == 0 || maxJ + rowOffset[maxI] == 0)
+				{
+					end = true;
+					break;
+				}
 				maxI -= 1;
+				maxJ += rowOffset[maxI+1] - rowOffset[maxI];
 				maxJ -= 1;
-				continue;
+				break;
 			case Mismatch:
 				mismatchLen += std::max(leftSize, rightSize);
+				if (maxI == 0 || maxJ + rowOffset[maxI] == 0)
+				{
+					end = true;
+					break;
+				}
 				maxI -= 1;
+				maxJ += rowOffset[maxI+1] - rowOffset[maxI];
 				maxJ -= 1;
-				continue;
+				break;
 			case Start:
 			default:
 				assert(false);
 		}
 	}
+	assert(result.leftStart == 0 || result.rightStart == 0);
 	result.alignmentLength = matchLen + mismatchLen;
 	if (result.alignmentLength == 0)
 	{
@@ -377,7 +429,17 @@ Alignment alignBandSparse(const Path& leftPath, const Path& rightPath, size_t le
 		result.alignmentLength = 0;
 		return result;
 	}
-	return alignSparse(leftPath, rightPath, left, right, mismatchPenalty, diagonalMatches[bestStart].first, diagonalMatches[bestEnd].first);
+	int diagonalMiddle = (diagonalMatches[bestEnd].first - diagonalMatches[bestStart].first) / 2;
+	int diagonalMin = diagonalMiddle - (int)bandWidth / 2;
+	int diagonalMax = diagonalMiddle + (int)bandWidth / 2;
+	if ((bestEnd - bestStart) * (bestEnd - bestStart) < rightPath.position.size())
+	{
+		return alignSparse(leftPath, rightPath, left, right, mismatchPenalty, diagonalMin, diagonalMax);
+	}
+	else
+	{
+		return align(leftPath, rightPath, left, right, mismatchPenalty, diagonalMin, diagonalMax);
+	}
 }
 
 void induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size_t minAlnLength, double minAlnIdentity, int numThreads, std::string tempAlnFileName, size_t bandWidth)
@@ -451,15 +513,7 @@ void induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size
 					size_t j = pair.first;
 					if (pair.second < minAlnLength) continue;
 					if (i == j) continue;
-					Alignment fwAln;
-					if (pair.second > paths[i].cumulativePrefixLength.back() || pair.second > paths[j].cumulativePrefixLength.back())
-					{
-						fwAln = align(paths[j].position, paths[i].position, paths[j].nodeSize, paths[i].nodeSize, j, i, mismatchPenalty);
-					}
-					else
-					{
-						fwAln = alignSparse(paths[j], paths[i], j, i, mismatchPenalty, -(paths[i].cumulativePrefixLength.back() + paths[j].cumulativePrefixLength.back()), (paths[i].cumulativePrefixLength.back() + paths[j].cumulativePrefixLength.back()));
-					}
+					Alignment fwAln = alignBandSparse(paths[j], paths[i], j, i, mismatchPenalty, minAlnLength, minAlnIdentity, bandWidth);
 					if (fwAln.alignmentLength >= minAlnLength && fwAln.alignmentIdentity >= minAlnIdentity)
 					{
 						for (size_t k = 0; k < fwAln.alignedPairs.size(); k++)
@@ -470,15 +524,7 @@ void induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size
 						fwAln.rightReverse = false;
 						writequeue.enqueue(fwAln);
 					}
-					Alignment bwAln;
-					if (pair.second > paths[i].cumulativePrefixLength.back() || pair.second > paths[j].cumulativePrefixLength.back())
-					{
-						bwAln = align(paths[j].position, reversePath.position, paths[j].nodeSize, reversePath.nodeSize, j, i, mismatchPenalty);
-					}
-					else
-					{
-						bwAln = alignSparse(paths[j], reversePath, j, i, mismatchPenalty, -(paths[i].cumulativePrefixLength.back() + paths[j].cumulativePrefixLength.back()), (paths[i].cumulativePrefixLength.back() + paths[j].cumulativePrefixLength.back()));
-					}
+					Alignment bwAln = alignBandSparse(paths[j], reversePath, j, i, mismatchPenalty, minAlnLength, minAlnIdentity, bandWidth);
 					if (bwAln.alignmentLength >= minAlnLength && bwAln.alignmentIdentity >= minAlnIdentity)
 					{
 						bwAln.rightStart = paths[i].position.size() - 1 - bwAln.rightStart;
