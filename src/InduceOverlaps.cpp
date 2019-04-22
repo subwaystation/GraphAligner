@@ -35,6 +35,143 @@ void iterateMostRecentAncestors(std::unordered_set<size_t>& tips, const std::vec
 	}
 }
 
+Alignment align(const std::vector<NodePos>& leftPath, const std::vector<NodePos>& rightPath, const std::vector<size_t>& leftNodeSize, const std::vector<size_t>& rightNodeSize, size_t left, size_t right, double mismatchPenalty)
+{
+	enum BacktraceType
+	{
+		Insertion,
+		Deletion,
+		Match,
+		Mismatch,
+		Start
+	};
+	static thread_local std::vector<std::vector<double>> DPscores;
+	static thread_local std::vector<std::vector<BacktraceType>> DPtrace;
+	static thread_local std::vector<std::vector<size_t>> matches;
+	if (DPscores.size() < leftPath.size()+1) DPscores.resize(leftPath.size()+1);
+	if (DPtrace.size() < leftPath.size()+1) DPtrace.resize(leftPath.size()+1);
+	if (matches.size() < leftPath.size()+1) matches.resize(leftPath.size()+1);
+	if (DPscores.back().size() < rightPath.size()+1)
+	{
+		for (size_t i = 0; i < DPscores.size(); i++)
+		{
+			DPscores[i].resize(rightPath.size()+1, 0);
+			DPtrace[i].resize(rightPath.size()+1, Start);
+			matches[i].resize(rightPath.size()+1, 0);
+		}
+	}
+	size_t maxI = 0;
+	size_t maxJ = 0;
+	for (size_t i = 0; i < leftPath.size(); i++)
+	{
+		for (size_t j = 0; j < rightPath.size(); j++)
+		{
+			matches[i+1][j+1] = 0;
+			DPscores[i+1][j+1] = 0;
+			DPtrace[i+1][j+1] = Start;
+			bool match = (leftPath[i] == rightPath[j]);
+			size_t leftSize = leftNodeSize[i];
+			size_t rightSize = rightNodeSize[j];
+			double insertionCost = leftSize * mismatchPenalty;
+			double deletionCost = rightSize * mismatchPenalty;
+			double mismatchCost = std::max(insertionCost, deletionCost);
+			double matchScore = leftSize;
+			assert(!match || leftSize == rightSize);
+			// if (DPscores[i][j+1] - insertionCost > DPscores[i+1][j+1])
+			// {
+				DPscores[i+1][j+1] = DPscores[i][j+1] - insertionCost;
+				DPtrace[i+1][j+1] = Insertion;
+				matches[i+1][j+1] = matches[i][j+1];
+			// }
+			if (DPscores[i+1][j] - deletionCost > DPscores[i+1][j+1])
+			{
+				DPscores[i+1][j+1] = DPscores[i+1][j] - deletionCost;
+				DPtrace[i+1][j+1] = Deletion;
+				matches[i+1][j+1] = matches[i+1][j];
+			}
+			if (match && DPscores[i][j] + matchScore >= DPscores[i+1][j+1])
+			{
+				DPscores[i+1][j+1] = DPscores[i][j] + matchScore;
+				DPtrace[i+1][j+1] = Match;
+				// maxima.erase(std::make_pair(i, j));
+				// maxima.emplace(i+1, j+1);
+				matches[i+1][j+1] = matches[i][j] + matchScore;
+			}
+			if (!match && DPscores[i][j] - mismatchCost >= DPscores[i+1][j+1])
+			{
+				DPscores[i+1][j+1] = DPscores[i][j] - mismatchCost;
+				DPtrace[i+1][j+1] = Mismatch;
+				matches[i+1][j+1] = matches[i][j];
+			}
+			if ((i == leftPath.size()-1 || j == rightPath.size() - 1) && DPscores[i+1][j+1] >= DPscores[maxI][maxJ])
+			{
+				maxI = i+1;
+				maxJ = j+1;
+			}
+		}
+	}
+	Alignment result;
+	if (maxI == 0 && maxJ == 0)
+	{
+		result.alignmentIdentity = 0;
+		return result;
+	}
+	size_t matchLen = 0;
+	size_t mismatchLen = 0;
+	result.leftPath = left;
+	result.rightPath = right;
+	result.alignmentLength = 0;
+	result.leftEnd = maxI-1;
+	result.rightEnd = maxJ-1;
+	while (DPtrace[maxI][maxJ] != Start)
+	{
+		assert(maxI > 0);
+		assert(maxJ > 0);
+		size_t leftSize = leftNodeSize[maxI-1];
+		size_t rightSize = rightNodeSize[maxJ-1];
+		result.leftStart = maxI-1;
+		result.rightStart = maxJ-1;
+		switch(DPtrace[maxI][maxJ])
+		{
+			case Insertion:
+				mismatchLen += leftSize;
+				maxI -= 1;
+				continue;
+			case Deletion:
+				mismatchLen += rightSize;
+				maxJ -= 1;
+				continue;
+			case Match:
+				assert(leftSize == rightSize);
+				result.alignedPairs.emplace_back();
+				result.alignedPairs.back().leftIndex = maxI-1;
+				result.alignedPairs.back().rightIndex = maxJ-1;
+				matchLen += leftSize;
+				maxI -= 1;
+				maxJ -= 1;
+				continue;
+			case Mismatch:
+				mismatchLen += std::max(leftSize, rightSize);
+				maxI -= 1;
+				maxJ -= 1;
+				continue;
+			case Start:
+			default:
+				assert(false);
+		}
+	}
+	result.alignmentLength = matchLen + mismatchLen;
+	if (result.alignmentLength == 0)
+	{
+		result.alignmentIdentity = 0;
+	}
+	else
+	{
+		result.alignmentIdentity = (double)matchLen / ((double)matchLen + (double)mismatchLen);
+	}
+	return result;
+}
+
 Alignment align(const Path& leftPath, const Path& rightPath, size_t left, size_t right, double mismatchPenalty, int diagonalMin, int diagonalMax)
 {
 	enum BacktraceType
@@ -66,8 +203,6 @@ Alignment align(const Path& leftPath, const Path& rightPath, size_t left, size_t
 		{
 			rowEnd++;
 		}
-		assert(rowStart == 0);
-		assert(rowEnd == leftPath.position.size());
 		assert(rowEnd <= leftPath.position.size());
 		DPscores[i].resize(rowEnd - rowStart);
 		DPtrace[i].resize(rowEnd - rowStart);
@@ -87,40 +222,23 @@ Alignment align(const Path& leftPath, const Path& rightPath, size_t left, size_t
 			double mismatchCost = std::max(insertionCost, deletionCost);
 			double matchScore = leftSize;
 			assert(!match || leftSize == rightSize);
-			if (i == 0 || j+rowStart == 0)
+			if ((i == 0 || j+rowStart == 0) && match && matchScore > DPscores[i][j])
 			{
-				if (match)
-				{
-					matches[i][j] = matchScore;
-					DPscores[i][j] = matchScore;
-					DPtrace[i][j] = Match;
-				}
-				else if (i == 0 && j + rowStart == 0)
-				{
-					matches[i][j] = 0;
-					DPscores[i][j] = -std::min(insertionCost, deletionCost);
-					if (insertionCost < deletionCost)
-					{
-						DPtrace[i][j] = Insertion;
-					}
-					else
-					{
-						DPtrace[i][j] = Deletion;
-					}
-				}
-				else if (i == 0)
-				{
-					matches[i][j] = 0;
-					DPscores[i][j] = -insertionCost;
-					DPtrace[i][j] = Insertion;
-				}
-				else
-				{
-					assert(j + rowStart == 0);
-					matches[i][j] = 0;
-					DPscores[i][j] = -deletionCost;
-					DPtrace[i][j] = Deletion;
-				}
+				matches[i][j] = matchScore;
+				DPscores[i][j] = matchScore;
+				DPtrace[i][j] = Match;
+			}
+			if (i == 0 && -insertionCost > DPscores[i][j])
+			{
+				matches[i][j] = 0;
+				DPscores[i][j] = -insertionCost;
+				DPtrace[i][j] = Insertion;
+			}
+			if (j+rowStart == 0 && -deletionCost > DPscores[i][j])
+			{
+				matches[i][j] = 0;
+				DPscores[i][j] = -deletionCost;
+				DPtrace[i][j] = Deletion;
 			}
 			assert(i == 0 || rowStart >= rowOffset.back());
 			size_t previousJ = 0;
@@ -129,29 +247,29 @@ Alignment align(const Path& leftPath, const Path& rightPath, size_t left, size_t
 				previousJ = j + (rowStart - rowOffset.back());
 				assert(previousJ + rowOffset.back() == j + rowStart);
 			}
-			if (i > 0 && previousJ-1 < DPscores[i-1].size() && match && DPscores[i-1][previousJ-1] + matchScore >= DPscores[i][j])
+			if (i > 0 && previousJ > 0 && previousJ-1 < DPscores[i-1].size() && match && DPscores[i-1][previousJ-1] + matchScore >= DPscores[i][j])
 			{
 				DPscores[i][j] = DPscores[i-1][previousJ-1] + matchScore;
 				DPtrace[i][j] = Match;
 				matches[i][j] = matches[i-1][previousJ-1] + matchScore;
 			}
-			if (i > 0 && previousJ-1 < DPscores[i-1].size() && !match && DPscores[i-1][previousJ-1] - mismatchCost >= DPscores[i][j])
+			if (i > 0 && previousJ > 0 && previousJ-1 < DPscores[i-1].size() && !match && DPscores[i-1][previousJ-1] - mismatchCost >= DPscores[i][j])
 			{
 				DPscores[i][j] = DPscores[i-1][previousJ-1] - mismatchCost;
 				DPtrace[i][j] = Mismatch;
 				matches[i][j] = matches[i-1][previousJ-1];
-			}
-			if (i > 0 && previousJ < DPscores[i-1].size() && DPscores[i-1][previousJ] - insertionCost > DPscores[i][j])
-			{
-				DPscores[i][j] = DPscores[i-1][previousJ] - insertionCost;
-				DPtrace[i][j] = Insertion;
-				matches[i][j] = matches[i-1][previousJ];
 			}
 			if (j > 0 && DPscores[i][j-1] - deletionCost > DPscores[i][j])
 			{
 				DPscores[i][j] = DPscores[i][j-1] - deletionCost;
 				DPtrace[i][j] = Deletion;
 				matches[i][j] = matches[i][j-1];
+			}
+			if (i > 0 && previousJ < DPscores[i-1].size() && DPscores[i-1][previousJ] - insertionCost > DPscores[i][j])
+			{
+				DPscores[i][j] = DPscores[i-1][previousJ] - insertionCost;
+				DPtrace[i][j] = Insertion;
+				matches[i][j] = matches[i-1][previousJ];
 			}
 			if ((i == rightPath.position.size()-1 || rowStart+j == leftPath.position.size()-1) && (maxI == -1 || DPscores[i][j] >= DPscores[maxI][maxJ]))
 			{
@@ -228,7 +346,8 @@ Alignment align(const Path& leftPath, const Path& rightPath, size_t left, size_t
 			case Mismatch:
 				assert(leftPath.position[maxJ + rowOffset[maxI]] != rightPath.position[maxI]);
 				mismatchLen += std::max(leftSize, rightSize);
-				assert(maxI > 0 && maxJ + rowOffset[maxI] > 0);
+				assert(maxI > 0);
+				assert(maxJ + rowOffset[maxI] > 0);
 				maxI -= 1;
 				maxJ += rowOffset[maxI+1] - rowOffset[maxI];
 				maxJ -= 1;
@@ -445,24 +564,24 @@ Alignment alignBandSparse(const Path& leftPath, const Path& rightPath, size_t le
 		currentMatchSize -= diagonalMatches[start].second;
 		start++;
 	}
-	// if (bestMatchSize < minAlnLength)
-	// {
-	// 	Alignment result;
-	// 	result.alignmentIdentity = 0;
-	// 	result.alignmentLength = 0;
-	// 	return result;
-	// }
+	if (bestMatchSize < minAlnLength)
+	{
+		Alignment result;
+		result.alignmentIdentity = 0;
+		result.alignmentLength = 0;
+		return result;
+	}
 	int diagonalMiddle = (diagonalMatches[bestEnd].first - diagonalMatches[bestStart].first) / 2;
 	int diagonalMin = diagonalMiddle - (int)bandWidth / 2;
 	int diagonalMax = diagonalMiddle + (int)bandWidth / 2;
-	// if ((bestEnd - bestStart) * (bestEnd - bestStart) < rightPath.position.size())
-	// {
-	// 	return alignSparse(leftPath, rightPath, left, right, mismatchPenalty, diagonalMin, diagonalMax);
-	// }
-	// else
-	// {
+	if ((bestEnd - bestStart) * (bestEnd - bestStart) < rightPath.position.size())
+	{
+		return alignSparse(leftPath, rightPath, left, right, mismatchPenalty, diagonalMin, diagonalMax);
+	}
+	else
+	{
 		return align(leftPath, rightPath, left, right, mismatchPenalty, diagonalMin, diagonalMax);
-	// }
+	}
 }
 
 void induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size_t minAlnLength, double minAlnIdentity, int numThreads, std::string tempAlnFileName, int bandWidth)
