@@ -101,7 +101,7 @@ rule induce_overlaps:
 		stdout = TMPDIR + "overlap_stdout.txt",
 		stderr = TMPDIR + "overlap_stderr.txt"
 	shell:
-		"/usr/bin/time -v {ALIGNERBINDIR}InduceOverlaps {input.graph} {input.alignments} {MINOVERLAPLENGTH} {MINOVERLAPIDENTITY} {threads} 1000 {output} 1> {log.stdout} 2> {log.stderr}"
+		"/usr/bin/time -v {ALIGNERBINDIR}InduceOverlaps {input.graph} {input.alignments} {MINOVERLAPLENGTH} {MINOVERLAPIDENTITY} {threads} {output} 1> {log.stdout} 2> {log.stderr}"
 
 rule initial_assembly:
 	input:
