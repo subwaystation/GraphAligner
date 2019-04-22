@@ -316,12 +316,12 @@ std::unordered_map<NodePos, std::vector<size_t>> getOccurrences(const Path& path
 
 void induceOverlaps(const std::vector<Path>& paths, const std::unordered_map<int, size_t>& nodeSizes, double mismatchPenalty, size_t minAlnLength, double minAlnIdentity, int numThreads, std::string tempAlnFileName)
 {
-	std::unordered_map<size_t, std::vector<size_t>> crossesNode;
+	std::unordered_map<NodePos, std::vector<size_t>> crossesNode;
 	for (size_t i = 0; i < paths.size(); i++)
 	{
 		for (auto node : paths[i].position)
 		{
-			crossesNode[node.id].push_back(i);
+			crossesNode[node].push_back(i);
 		}
 	}
 	std::vector<std::vector<size_t>> cumulativePrefixLengths;
@@ -374,22 +374,33 @@ void induceOverlaps(const std::vector<Path>& paths, const std::unordered_map<int
 				}
 				if (i >= paths.size()) break;
 				std::cerr << i << "/" << paths.size() << std::endl;
-				std::unordered_map<size_t, size_t> possibleMatches;
-				for (size_t j = 0; j < paths[i].position.size(); j++)
-				{
-					auto node = paths[i].position[j];
-					size_t nodeSize = nodeSizes.at(paths[i].position[j].id);
-					for (auto other : crossesNode[node.id])
-					{
-						if (other <= i) continue;
-						possibleMatches[other] += nodeSize;
-					}
-				}
+				std::unordered_map<size_t, size_t> possibleFwMatches;
+				std::unordered_map<size_t, size_t> possibleBwMatches;
 				auto reversePath = paths[i].Reverse();
 				auto occurrences = getOccurrences(paths[i]);
 				auto reverseOccurrences = getOccurrences(reversePath);
 				auto reverseCumulativePrefixLengths = getCumulativePrefixLength(reversePath, nodeSizes);
-				for (auto pair : possibleMatches)
+				for (size_t j = 0; j < paths[i].position.size(); j++)
+				{
+					auto node = paths[i].position[j];
+					size_t nodeSize = nodeSizes.at(paths[i].position[j].id);
+					for (auto other : crossesNode[node])
+					{
+						if (other <= i) continue;
+						possibleFwMatches[other] += nodeSize;
+					}
+				}
+				for (size_t j = 0; j < reversePath.position.size(); j++)
+				{
+					auto node = reversePath.position[j];
+					size_t nodeSize = nodeSizes.at(reversePath.position[j].id);
+					for (auto other : crossesNode[node])
+					{
+						if (other <= i) continue;
+						possibleBwMatches[other] += nodeSize;
+					}
+				}
+				for (auto pair : possibleFwMatches)
 				{
 					size_t j = pair.first;
 					if (pair.second < minAlnLength) continue;
@@ -413,6 +424,12 @@ void induceOverlaps(const std::vector<Path>& paths, const std::unordered_map<int
 						fwAln.rightReverse = false;
 						writequeue.enqueue(fwAln);
 					}
+				}
+				for (auto pair : possibleBwMatches)
+				{
+					size_t j = pair.first;
+					if (pair.second < minAlnLength) continue;
+					if (i == j) continue;
 					Alignment bwAln;
 					if (pair.second > cumulativePrefixLengths[i].back() || pair.second > cumulativePrefixLengths[j].back())
 					{
