@@ -35,7 +35,7 @@ void iterateMostRecentAncestors(std::unordered_set<size_t>& tips, const std::vec
 	}
 }
 
-Alignment alignSparse(const Path& leftPath, const Path& rightPath, size_t left, size_t right, double mismatchPenalty)
+Alignment alignSparse(const Path& leftPath, const Path& rightPath, const std::unordered_map<int, size_t>& nodeSizes, const std::vector<size_t>& leftCumulativePrefixLength, const std::vector<size_t>& rightCumulativePrefixLength, const std::unordered_map<NodePos, std::vector<size_t>>& rightOccurrences, size_t left, size_t right, double mismatchPenalty)
 {
 	std::vector<std::tuple<size_t, size_t, double, size_t>> trace;
 	std::unordered_set<size_t> tips;
@@ -44,30 +44,30 @@ Alignment alignSparse(const Path& leftPath, const Path& rightPath, size_t left, 
 	double bestStartScore = 0;
 	for (size_t i = 0; i < leftPath.position.size(); i++)
 	{
-		if (rightPath.occurrences.count(leftPath.position[i]) == 1)
+		if (rightOccurrences.count(leftPath.position[i]) == 1)
 		{
-			for (auto j : rightPath.occurrences.at(leftPath.position[i]))
+			for (auto j : rightOccurrences.at(leftPath.position[i]))
 			{
 				size_t index = trace.size();
 				tips.insert(index);
 				inNeighbors.emplace_back();
 				trace.emplace_back(i, j, 0, (size_t)-1);
-				std::get<2>(trace.back()) = -(double)std::min(leftPath.cumulativePrefixLength[i], rightPath.cumulativePrefixLength[j]) * mismatchPenalty;
-				assert(std::get<2>(trace.back()) < leftPath.cumulativePrefixLength.back() && std::get<2>(trace.back()) < rightPath.cumulativePrefixLength.back());
-				assert(std::get<2>(trace.back()) > -(double)leftPath.cumulativePrefixLength.back() * mismatchPenalty || std::get<2>(trace.back()) > -(double)rightPath.cumulativePrefixLength.back() * mismatchPenalty);
+				std::get<2>(trace.back()) = -(double)std::min(leftCumulativePrefixLength[i], rightCumulativePrefixLength[j]) * mismatchPenalty;
+				assert(std::get<2>(trace.back()) < leftCumulativePrefixLength.back() && std::get<2>(trace.back()) < rightCumulativePrefixLength.back());
+				assert(std::get<2>(trace.back()) > -(double)leftCumulativePrefixLength.back() * mismatchPenalty || std::get<2>(trace.back()) > -(double)rightCumulativePrefixLength.back() * mismatchPenalty);
 				std::vector<size_t> removedTips;
-				iterateMostRecentAncestors(tips, inNeighbors, [mismatchPenalty, &leftPath, &rightPath, &trace, &inNeighbors, &removedTips, i, j, index](size_t k)
+				iterateMostRecentAncestors(tips, inNeighbors, [mismatchPenalty, &leftCumulativePrefixLength, &rightCumulativePrefixLength, &leftPath, &rightPath, &trace, &inNeighbors, &removedTips, i, j, index](size_t k)
 				{
 					if (k == index) return false;
 					if (std::get<0>(trace[k]) >= i || std::get<1>(trace[k]) >= j) return false;
 					removedTips.push_back(k);
 					inNeighbors[index].push_back(k);
-					double insertions = leftPath.cumulativePrefixLength[i] - leftPath.cumulativePrefixLength[std::get<0>(trace[k])+1];
-					double deletions = rightPath.cumulativePrefixLength[j] - rightPath.cumulativePrefixLength[std::get<1>(trace[k])+1];
+					double insertions = leftCumulativePrefixLength[i] - leftCumulativePrefixLength[std::get<0>(trace[k])+1];
+					double deletions = rightCumulativePrefixLength[j] - rightCumulativePrefixLength[std::get<1>(trace[k])+1];
 					assert(insertions >= 0);
 					assert(deletions >= 0);
-					assert(insertions <= leftPath.cumulativePrefixLength.back());
-					assert(deletions <= rightPath.cumulativePrefixLength.back());
+					assert(insertions <= leftCumulativePrefixLength.back());
+					assert(deletions <= rightCumulativePrefixLength.back());
 					double btScore = std::get<2>(trace[k]) - std::max(insertions, deletions) * mismatchPenalty;
 					if (btScore > std::get<2>(trace.back()))
 					{
@@ -81,8 +81,8 @@ Alignment alignSparse(const Path& leftPath, const Path& rightPath, size_t left, 
 					tips.erase(k);
 				}
 				assert(leftPath.position[i] == rightPath.position[j]);
-				std::get<2>(trace.back()) += leftPath.nodeSize[i];
-				double startScoreHere = std::get<2>(trace.back()) - (double)std::min(leftPath.cumulativePrefixLength.back() - leftPath.cumulativePrefixLength[i+1], rightPath.cumulativePrefixLength.back() - rightPath.cumulativePrefixLength[j+1]) * mismatchPenalty;
+				std::get<2>(trace.back()) += nodeSizes.at(leftPath.position[i].id);
+				double startScoreHere = std::get<2>(trace.back()) - (double)std::min(leftCumulativePrefixLength.back() - leftCumulativePrefixLength[i+1], rightCumulativePrefixLength.back() - rightCumulativePrefixLength[j+1]) * mismatchPenalty;
 				if (startScoreHere > bestStartScore || bestTraceStart == -1)
 				{
 					bestTraceStart = trace.size()-1;
@@ -102,9 +102,9 @@ Alignment alignSparse(const Path& leftPath, const Path& rightPath, size_t left, 
 	size_t j = std::get<1>(trace[pos]);
 	size_t matchLen = 0;
 	size_t mismatchLen = 0;
-	size_t indelSize = std::min(leftPath.cumulativePrefixLength.back() - leftPath.cumulativePrefixLength[i+1], rightPath.cumulativePrefixLength.back() - rightPath.cumulativePrefixLength[j+1]);
+	size_t indelSize = std::min(leftCumulativePrefixLength.back() - leftCumulativePrefixLength[i+1], rightCumulativePrefixLength.back() - rightCumulativePrefixLength[j+1]);
 	assert(indelSize >= 0);
-	assert(indelSize <= leftPath.cumulativePrefixLength.back() || indelSize <= rightPath.cumulativePrefixLength.back());
+	assert(indelSize <= leftCumulativePrefixLength.back() || indelSize <= rightCumulativePrefixLength.back());
 	result.leftPath = left;
 	result.rightPath = right;
 	result.leftEnd = i;
@@ -112,8 +112,8 @@ Alignment alignSparse(const Path& leftPath, const Path& rightPath, size_t left, 
 	assert(result.leftEnd < leftPath.position.size());
 	assert(result.rightEnd < rightPath.position.size());
 	// one past the real end
-	while (result.leftEnd < leftPath.position.size() && leftPath.cumulativePrefixLength[result.leftEnd+1] - leftPath.cumulativePrefixLength[i+1] <= indelSize) result.leftEnd++;
-	while (result.rightEnd < rightPath.position.size() && rightPath.cumulativePrefixLength[result.rightEnd+1] - rightPath.cumulativePrefixLength[j+1] <= indelSize) result.rightEnd++;
+	while (result.leftEnd < leftPath.position.size() && leftCumulativePrefixLength[result.leftEnd+1] - leftCumulativePrefixLength[i+1] <= indelSize) result.leftEnd++;
+	while (result.rightEnd < rightPath.position.size() && rightCumulativePrefixLength[result.rightEnd+1] - rightCumulativePrefixLength[j+1] <= indelSize) result.rightEnd++;
 	// fix to correct position
 	result.leftEnd--;
 	result.rightEnd--;
@@ -124,16 +124,16 @@ Alignment alignSparse(const Path& leftPath, const Path& rightPath, size_t left, 
 		assert(std::get<3>(trace[pos]) < pos);
 		i = std::get<0>(trace[pos]);
 		j = std::get<1>(trace[pos]);
-		matchLen += leftPath.nodeSize[i];
+		matchLen += nodeSizes.at(leftPath.position[i].id);
 		result.alignedPairs.emplace_back();
 		result.alignedPairs.back().leftIndex = i;
 		result.alignedPairs.back().rightIndex = j;
 		pos = std::get<3>(trace[pos]);
 		size_t nextI = std::get<0>(trace[pos]);
 		size_t nextJ = std::get<1>(trace[pos]);
-		indelSize = std::max(leftPath.cumulativePrefixLength[i] - leftPath.cumulativePrefixLength[nextI+1], rightPath.cumulativePrefixLength[j] - rightPath.cumulativePrefixLength[nextJ+1]);
+		indelSize = std::max(leftCumulativePrefixLength[i] - leftCumulativePrefixLength[nextI+1], rightCumulativePrefixLength[j] - rightCumulativePrefixLength[nextJ+1]);
 		assert(indelSize >= 0);
-		assert(indelSize <= leftPath.cumulativePrefixLength.back() || indelSize <= rightPath.cumulativePrefixLength.back());
+		assert(indelSize <= leftCumulativePrefixLength.back() || indelSize <= rightCumulativePrefixLength.back());
 		mismatchLen += indelSize;
 	}
 	i = std::get<0>(trace[pos]);
@@ -141,22 +141,22 @@ Alignment alignSparse(const Path& leftPath, const Path& rightPath, size_t left, 
 	result.alignedPairs.emplace_back();
 	result.alignedPairs.back().leftIndex = i;
 	result.alignedPairs.back().rightIndex = j;
-	matchLen += leftPath.nodeSize[i];
-	indelSize = std::min(leftPath.cumulativePrefixLength[i], rightPath.cumulativePrefixLength[j]);
+	matchLen += nodeSizes.at(leftPath.position[i].id);
+	indelSize = std::min(leftCumulativePrefixLength[i], rightCumulativePrefixLength[j]);
 	assert(indelSize >= 0);
-	assert(indelSize <= leftPath.cumulativePrefixLength.back() || indelSize <= rightPath.cumulativePrefixLength.back());
+	assert(indelSize <= leftCumulativePrefixLength.back() || indelSize <= rightCumulativePrefixLength.back());
 	mismatchLen += indelSize;
 	result.leftStart = i;
 	result.rightStart = j;
-	while (result.leftStart > 0 && leftPath.cumulativePrefixLength[i] - leftPath.cumulativePrefixLength[result.leftStart-1] <= indelSize) result.leftStart--;
-	while (result.rightStart > 0 && rightPath.cumulativePrefixLength[j] - rightPath.cumulativePrefixLength[result.rightStart-1] <= indelSize) result.rightStart--;
+	while (result.leftStart > 0 && leftCumulativePrefixLength[i] - leftCumulativePrefixLength[result.leftStart-1] <= indelSize) result.leftStart--;
+	while (result.rightStart > 0 && rightCumulativePrefixLength[j] - rightCumulativePrefixLength[result.rightStart-1] <= indelSize) result.rightStart--;
 	assert(result.leftStart == 0 || result.rightStart == 0);
 	result.alignmentLength = matchLen + mismatchLen;
 	result.alignmentIdentity = (double)matchLen / ((double)mismatchLen + (double)matchLen);
 	return result;
 }
 
-Alignment align(const std::vector<NodePos>& leftPath, const std::vector<NodePos>& rightPath, const std::vector<size_t>& leftNodeSize, const std::vector<size_t>& rightNodeSize, size_t left, size_t right, double mismatchPenalty)
+Alignment align(const std::vector<NodePos>& leftPath, const std::vector<NodePos>& rightPath, const std::unordered_map<int, size_t>& nodeSizes, size_t left, size_t right, double mismatchPenalty)
 {
 	enum BacktraceType
 	{
@@ -191,8 +191,8 @@ Alignment align(const std::vector<NodePos>& leftPath, const std::vector<NodePos>
 			DPscores[i+1][j+1] = 0;
 			DPtrace[i+1][j+1] = Start;
 			bool match = (leftPath[i] == rightPath[j]);
-			size_t leftSize = leftNodeSize[i];
-			size_t rightSize = rightNodeSize[j];
+			size_t leftSize = nodeSizes.at(leftPath[i].id);
+			size_t rightSize = nodeSizes.at(rightPath[j].id);
 			double insertionCost = leftSize * mismatchPenalty;
 			double deletionCost = rightSize * mismatchPenalty;
 			double mismatchCost = std::max(insertionCost, deletionCost);
@@ -248,8 +248,8 @@ Alignment align(const std::vector<NodePos>& leftPath, const std::vector<NodePos>
 	{
 		assert(maxI > 0);
 		assert(maxJ > 0);
-		size_t leftSize = leftNodeSize[maxI-1];
-		size_t rightSize = rightNodeSize[maxJ-1];
+		size_t leftSize = nodeSizes.at(leftPath[maxI-1].id);
+		size_t rightSize = nodeSizes.at(rightPath[maxJ-1].id);
 		result.leftStart = maxI-1;
 		result.rightStart = maxJ-1;
 		switch(DPtrace[maxI][maxJ])
@@ -293,7 +293,28 @@ Alignment align(const std::vector<NodePos>& leftPath, const std::vector<NodePos>
 	return result;
 }
 
-void induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size_t minAlnLength, double minAlnIdentity, int numThreads, std::string tempAlnFileName)
+std::vector<size_t> getCumulativePrefixLength(const Path& path, const std::unordered_map<int, size_t>& nodeSizes)
+{
+	std::vector<size_t> result;
+	result.resize(path.position.size()+1, 0);
+	for (int i = 0; i < path.position.size(); i++)
+	{
+		result[i+1] = result[i] + nodeSizes.at(path.position[i].id);
+	}
+	return result;
+}
+
+std::unordered_map<NodePos, std::vector<size_t>> getOccurrences(const Path& path)
+{
+	std::unordered_map<NodePos, std::vector<size_t>> result;
+	for (size_t i = 0; i < path.position.size(); i++)
+	{
+		result[path.position[i]].push_back(i);
+	}
+	return result;
+}
+
+void induceOverlaps(const std::vector<Path>& paths, const std::unordered_map<int, size_t>& nodeSizes, double mismatchPenalty, size_t minAlnLength, double minAlnIdentity, int numThreads, std::string tempAlnFileName)
 {
 	std::unordered_map<size_t, std::vector<size_t>> crossesNode;
 	for (size_t i = 0; i < paths.size(); i++)
@@ -302,6 +323,12 @@ void induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size
 		{
 			crossesNode[node.id].push_back(i);
 		}
+	}
+	std::vector<std::vector<size_t>> cumulativePrefixLengths;
+	cumulativePrefixLengths.resize(paths.size());
+	for (size_t i = 0; i < paths.size(); i++)
+	{
+		cumulativePrefixLengths[i] = getCumulativePrefixLength(paths[i], nodeSizes);
 	}
 	moodycamel::ConcurrentQueue<Alignment> writequeue;
 	std::atomic<bool> overlapsFinished;
@@ -335,7 +362,7 @@ void induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size
 	size_t nextRead = 0;
 	for (size_t thread = 0; thread < numThreads; thread++)
 	{
-		threads.emplace_back([&writequeue, &paths, &nextRead, &nextReadMutex, thread, &crossesNode, minAlnIdentity, minAlnLength, mismatchPenalty]()
+		threads.emplace_back([&writequeue, &nodeSizes, &cumulativePrefixLengths, &paths, &nextRead, &nextReadMutex, thread, &crossesNode, minAlnIdentity, minAlnLength, mismatchPenalty]()
 		{
 			while (true)
 			{
@@ -351,7 +378,7 @@ void induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size
 				for (size_t j = 0; j < paths[i].position.size(); j++)
 				{
 					auto node = paths[i].position[j];
-					size_t nodeSize = paths[i].nodeSize[j];
+					size_t nodeSize = nodeSizes.at(paths[i].position[j].id);
 					for (auto other : crossesNode[node.id])
 					{
 						if (other <= i) continue;
@@ -359,19 +386,22 @@ void induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size
 					}
 				}
 				auto reversePath = paths[i].Reverse();
+				auto occurrences = getOccurrences(paths[i]);
+				auto reverseOccurrences = getOccurrences(reversePath);
+				auto reverseCumulativePrefixLengths = getCumulativePrefixLength(reversePath, nodeSizes);
 				for (auto pair : possibleMatches)
 				{
 					size_t j = pair.first;
 					if (pair.second < minAlnLength) continue;
 					if (i == j) continue;
 					Alignment fwAln;
-					if (pair.second > paths[i].cumulativePrefixLength.back() || pair.second > paths[j].cumulativePrefixLength.back())
+					if (pair.second > cumulativePrefixLengths[i].back() || pair.second > cumulativePrefixLengths[j].back())
 					{
-						fwAln = align(paths[j].position, paths[i].position, paths[j].nodeSize, paths[i].nodeSize, j, i, mismatchPenalty);
+						fwAln = align(paths[j].position, paths[i].position, nodeSizes, j, i, mismatchPenalty);
 					}
 					else
 					{
-						fwAln = alignSparse(paths[j], paths[i], j, i, mismatchPenalty);
+						fwAln = alignSparse(paths[j], paths[i], nodeSizes, cumulativePrefixLengths[j], cumulativePrefixLengths[i], occurrences, j, i, mismatchPenalty);
 					}
 					if (fwAln.alignmentLength >= minAlnLength && fwAln.alignmentIdentity >= minAlnIdentity)
 					{
@@ -384,13 +414,13 @@ void induceOverlaps(const std::vector<Path>& paths, double mismatchPenalty, size
 						writequeue.enqueue(fwAln);
 					}
 					Alignment bwAln;
-					if (pair.second > paths[i].cumulativePrefixLength.back() || pair.second > paths[j].cumulativePrefixLength.back())
+					if (pair.second > cumulativePrefixLengths[i].back() || pair.second > cumulativePrefixLengths[j].back())
 					{
-						bwAln = align(paths[j].position, reversePath.position, paths[j].nodeSize, reversePath.nodeSize, j, i, mismatchPenalty);
+						bwAln = align(paths[j].position, reversePath.position, nodeSizes, j, i, mismatchPenalty);
 					}
 					else
 					{
-						bwAln = alignSparse(paths[j], reversePath, j, i, mismatchPenalty);
+						bwAln = alignSparse(paths[j], reversePath, nodeSizes, cumulativePrefixLengths[j], reverseCumulativePrefixLengths, reverseOccurrences, j, i, mismatchPenalty);
 					}
 					if (bwAln.alignmentLength >= minAlnLength && bwAln.alignmentIdentity >= minAlnIdentity)
 					{
@@ -434,17 +464,16 @@ int main(int argc, char** argv)
 		mismatchPenalty = 1.0 / (1.0 - minAlnIdentity);
 	}
 
-	std::cerr << "load graph" << std::endl;
-	auto graph = GfaGraph::LoadFromFile(inputGraph);
-	graph.confirmDoublesidedEdges();
+	std::unordered_map<int, size_t> nodeSizes;
+	{
+		std::cerr << "load graph" << std::endl;
+		auto graph = GfaGraph::LoadFromFile(inputGraph);
+		graph.confirmDoublesidedEdges();
+		nodeSizes = getNodeSizes(graph);
+	}
 	std::cerr << "load paths" << std::endl;
-	auto paths = loadAlignmentsAsPaths(inputAlns);
-	std::cerr << paths.size() << " paths" << std::endl;
-	std::cerr << "add node lengths" << std::endl;
-	paths = addNodeLengths(paths, graph);
-	std::cerr << "filter paths on length" << std::endl;
-	paths = filterByLength(paths, 1000);
-	std::cerr << paths.size() << " alignments after filtering by length" << std::endl;
+	auto paths = loadAlignmentsAsPaths(inputAlns, 1000, nodeSizes);
+	std::cerr << paths.size() << " paths after filtering by length" << std::endl;
 	std::cerr << "induce overlaps" << std::endl;
-	induceOverlaps(paths, mismatchPenalty, minAlnLength, minAlnIdentity, numThreads, outputOverlaps);
+	induceOverlaps(paths, nodeSizes, mismatchPenalty, minAlnLength, minAlnIdentity, numThreads, outputOverlaps);
 }

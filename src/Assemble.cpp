@@ -6,32 +6,11 @@ Path Path::Reverse() const
 {
 	Path result = *this;
 	std::reverse(result.position.begin(), result.position.end());
-	std::reverse(result.nodeSize.begin(), result.nodeSize.end());
 	for (size_t i = 0; i < result.position.size(); i++)
 	{
 		result.position[i] = result.position[i].Reverse();
 	}
-	result.calculateOccurrences();
-	result.calculateCumulativePrefixLength();
 	return result;
-}
-
-void Path::calculateCumulativePrefixLength()
-{
-	cumulativePrefixLength.resize(nodeSize.size()+1, 0);
-	for (size_t i = 1; i < cumulativePrefixLength.size(); i++)
-	{
-		cumulativePrefixLength[i] = cumulativePrefixLength[i-1] + nodeSize[i-1];
-	}
-}
-
-void Path::calculateOccurrences()
-{
-	occurrences.clear();
-	for (size_t i = 0; i < position.size(); i++)
-	{
-		occurrences[position[i]].push_back(i);
-	}
 }
 
 bool AlignmentQualityCompareLT(const Alignment& left, const Alignment& right)
@@ -108,7 +87,7 @@ void WriteAlignment(std::ofstream& file, const Alignment& aln)
 	}
 }
 
-std::vector<Path> loadAlignmentsAsPaths(std::string fileName)
+std::vector<Path> loadAlignmentsAsPaths(std::string fileName, size_t minLen, const std::unordered_map<int, size_t>& nodeSizes)
 {
 	std::unordered_map<std::string, std::vector<std::pair<size_t, std::vector<NodePos>>>> alnsPerRead;
 
@@ -132,10 +111,12 @@ std::vector<Path> loadAlignmentsAsPaths(std::string fileName)
 		std::sort(pair.second.begin(), pair.second.end(), [](const std::pair<size_t, std::vector<NodePos>>& left, const std::pair<size_t, std::vector<NodePos>>& right) { return left.first < right.first; });
 		result.emplace_back();
 		result.back().name = pair.first;
+		size_t totalSize = 0;
 		for (auto p : pair.second)
 		{
 			for (auto pos : p.second)
 			{
+				totalSize += nodeSizes.at(pos.id);
 				result.back().position.emplace_back(pos.id, pos.end);
 			}
 		}
@@ -144,37 +125,17 @@ std::vector<Path> loadAlignmentsAsPaths(std::string fileName)
 			result.pop_back();
 			continue;
 		}
-		result.back().calculateOccurrences();
+		if (totalSize < minLen) result.pop_back();
 	}
 	return result;
 }
 
-std::vector<Path> addNodeLengths(const std::vector<Path>& original, const GfaGraph& graph)
+std::unordered_map<int, size_t> getNodeSizes(const GfaGraph& graph)
 {
-	std::vector<Path> result = original;
-	for (size_t i = 0; i < original.size(); i++)
+	std::unordered_map<int, size_t> result;
+	for (auto pair : graph.nodes)
 	{
-		result[i].nodeSize.reserve(result[i].position.size());
-		for (size_t j = 0; j < original[i].position.size(); j++)
-		{
-			result[i].nodeSize.push_back(graph.nodes.at(original[i].position[j].id).size() - graph.edgeOverlap);
-		}
-		result[i].calculateCumulativePrefixLength();
-	}
-	return result;
-}
-
-std::vector<Path> filterByLength(const std::vector<Path>& paths, size_t minLen)
-{
-	std::vector<Path> result;
-	for (auto path : paths)
-	{
-		size_t len = 0;
-		for (auto nodeSize : path.nodeSize)
-		{
-			len += nodeSize;
-		}
-		if (len >= minLen) result.push_back(path);
+		result[pair.first] = pair.second.size() - graph.edgeOverlap;
 	}
 	return result;
 }

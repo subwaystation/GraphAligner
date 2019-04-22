@@ -9,12 +9,7 @@ struct Path
 {
 	std::string name;
 	std::vector<NodePos> position;
-	std::vector<size_t> nodeSize;
-	std::vector<size_t> cumulativePrefixLength;
-	std::unordered_map<NodePos, std::vector<size_t>> occurrences;
 	Path Reverse() const;
-	void calculateCumulativePrefixLength();
-	void calculateOccurrences();
 };
 
 struct AlignmentMatch
@@ -110,6 +105,5 @@ private:
 	const std::vector<Alignment>* const paths;
 };
 
-std::vector<Path> loadAlignmentsAsPaths(std::string fileName);
-std::vector<Path> addNodeLengths(const std::vector<Path>& original, const GfaGraph& graph);
-std::vector<Path> filterByLength(const std::vector<Path>& paths, size_t minLen);
+std::vector<Path> loadAlignmentsAsPaths(std::string fileName, size_t minLen, const std::unordered_map<int, size_t>& nodeSizes);
+std::unordered_map<int, size_t> getNodeSizes(const GfaGraph& graph);

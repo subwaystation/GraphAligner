@@ -750,14 +750,13 @@ int main(int argc, char** argv)
 	std::cerr << "load graph" << std::endl;
 	auto graph = GfaGraph::LoadFromFile(inputGraph);
 	graph.confirmDoublesidedEdges();
-	std::cerr << "load paths" << std::endl;
-	auto paths = loadAlignmentsAsPaths(inputAlns);
-	std::cerr << paths.size() << " paths" << std::endl;
-	std::cerr << "add node lengths" << std::endl;
-	paths = addNodeLengths(paths, graph);
-	std::cerr << "filter paths on length" << std::endl;
-	paths = filterByLength(paths, 1000);
-	std::cerr << paths.size() << " paths after filtering by length" << std::endl;
+	std::vector<Path> paths;
+	{
+		auto nodeSizes = getNodeSizes(graph);
+		std::cerr << "load paths" << std::endl;
+		paths = loadAlignmentsAsPaths(inputAlns, 1000, nodeSizes);
+		std::cerr << paths.size() << " paths after filtering by length" << std::endl;
+	}
 	std::cerr << "pick longest alignments" << std::endl;
 	auto pickedAlns = pickLongestPerRead(paths, inputOverlaps, maxAlnCount);
 	std::cerr << "get transitive closure" << std::endl;
