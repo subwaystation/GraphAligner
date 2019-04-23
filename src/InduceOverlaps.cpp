@@ -6,6 +6,8 @@
 
 size_t getDiagonalLength(int offset, int width, int height)
 {
+	assert(offset <= width);
+	assert(offset >= -height);
 	int corner = width - height;
 	if (offset >= 0 && offset >= corner)
 	{
@@ -30,6 +32,9 @@ size_t getDiagonalLength(int offset, int width, int height)
 
 Alignment approxAlign(const Path& leftPath, const Path& rightPath, const std::unordered_map<int, size_t>& nodeSizes, const std::vector<size_t>& leftCumulativePrefixLength, const std::vector<size_t>& rightCumulativePrefixLength, const std::unordered_map<NodePos, std::vector<size_t>>& rightOccurrences, size_t left, size_t right, double mismatchPenalty, int bandwidth)
 {
+	std::vector<size_t> matchesInParallelogram;
+	size_t numParallelograms = (leftCumulativePrefixLength.back() + rightCumulativePrefixLength.back() + bandwidth-1) / bandwidth;
+	matchesInParallelogram.resize(numParallelograms, 0);
 	std::vector<std::tuple<int, size_t, size_t, size_t>> diagonalMatches;
 	for (size_t i = 0; i < leftPath.position.size(); i++)
 	{
@@ -38,76 +43,69 @@ Alignment approxAlign(const Path& leftPath, const Path& rightPath, const std::un
 		for (auto j : rightOccurrences.at(leftPath.position[i]))
 		{
 			assert(j < rightPath.position.size());
-			diagonalMatches.emplace_back((int)leftCumulativePrefixLength[i] - (int)rightCumulativePrefixLength[j], size, i, j);
+			int diagonal = (int)leftCumulativePrefixLength[i] - (int)rightCumulativePrefixLength[j];
+			assert(diagonal >= -(int)rightCumulativePrefixLength.back());
+			size_t parallelogram = (diagonal + (int)rightCumulativePrefixLength.back()) / bandwidth;
+			assert(parallelogram < matchesInParallelogram.size());
+			matchesInParallelogram[parallelogram] += size;
 		}
 	}
-	std::sort(diagonalMatches.begin(), diagonalMatches.end(), [](const std::tuple<int, size_t, size_t, size_t>& left, const std::tuple<int, size_t, size_t, size_t>& right) { return std::get<0>(left) < std::get<0>(right); });
-	if (diagonalMatches.size() == 0)
-	{
-		Alignment result;
-		result.alignmentIdentity = 0;
-		result.alignmentLength = 0;
-		return result;
-	}
-	size_t start = 0;
-	size_t end = 0;
-	size_t matchesHere = std::get<1>(diagonalMatches[0]);
-	size_t bestStart = -1;
-	size_t bestEnd = -1;
+	size_t maxParallelogram = 0;
 	double bestScore = 0;
-	while (start < diagonalMatches.size())
+	for (size_t i = 0; i < matchesInParallelogram.size(); i++)
 	{
-		while (end < diagonalMatches.size()-1 && std::get<0>(diagonalMatches[end+1]) <= std::get<0>(diagonalMatches[start]) + bandwidth)
+		if (matchesInParallelogram[i] == 0) continue;
+		int diagonal = (int)i * bandwidth - (int)rightCumulativePrefixLength.back() + bandwidth * 0.5;
+		if (i == matchesInParallelogram.size()-1)
 		{
-			end++;
-			matchesHere += std::get<1>(diagonalMatches[end]);
+			diagonal = (int)i * bandwidth - (int)rightCumulativePrefixLength.back();
 		}
-		assert(end >= start);
-		int middle = (std::get<0>(diagonalMatches[start]) + std::get<0>(diagonalMatches[end])) / 2.0;
-		size_t alignmentLength = getDiagonalLength(middle, leftCumulativePrefixLength.back(), rightCumulativePrefixLength.back());
-		double estimatedScoreHere = matchesHere;
-		if (matchesHere < alignmentLength) estimatedScoreHere -= (double)(alignmentLength - matchesHere) * mismatchPenalty;
+		size_t alignmentLength = getDiagonalLength(diagonal, leftCumulativePrefixLength.back(), rightCumulativePrefixLength.back());
+		double estimatedScoreHere = matchesInParallelogram[i];
+		if (matchesInParallelogram[i] < alignmentLength) estimatedScoreHere -= (double)(alignmentLength - matchesInParallelogram[i]) * mismatchPenalty;
 		if (estimatedScoreHere > bestScore)
 		{
-			bestStart = start;
-			bestEnd = end;
 			bestScore = estimatedScoreHere;
+			maxParallelogram = i;
 		}
-		while (start < diagonalMatches.size()-1 && std::get<0>(diagonalMatches[start+1]) == std::get<0>(diagonalMatches[start]))
-		{
-			matchesHere -= std::get<1>(diagonalMatches[start]);
-			start++;
-		}
-		assert(start < diagonalMatches.size());
-		matchesHere -= std::get<1>(diagonalMatches[start]);
-		start++;
 	}
-	if (bestStart == -1 || bestEnd == -1)
+	if (matchesInParallelogram[maxParallelogram] == 0)
 	{
 		Alignment result;
-		result.alignmentIdentity = 0;
 		result.alignmentLength = 0;
+		result.alignmentIdentity = 0;
 		return result;
 	}
-	assert(bestEnd >= bestStart);
+	int diagonalMin = ((int)maxParallelogram - 1) * bandwidth - (int)rightCumulativePrefixLength.back();
+	int diagonalMax = ((int)maxParallelogram + 2) * bandwidth - (int)rightCumulativePrefixLength.back();
 	Alignment result;
 	result.alignmentLength = 0;
 	result.leftPath = left;
 	result.rightPath = right;
 	size_t matches = 0;
-	std::sort(diagonalMatches.begin()+bestStart, diagonalMatches.begin()+bestEnd+1, [](const std::tuple<int, size_t, size_t, size_t>& left, const std::tuple<int, size_t, size_t, size_t>& right) { return std::get<2>(left) < std::get<2>(right) || (std::get<2>(left) == std::get<2>(right) && std::get<3>(left) < std::get<3>(right)); });
-	for (size_t index = bestStart; index <= bestEnd; index++)
+	for (size_t i = 0; i < leftPath.position.size(); i++)
 	{
-		if (result.alignedPairs.size() == 0 || (std::get<2>(diagonalMatches[index]) > result.alignedPairs.back().leftIndex && std::get<3>(diagonalMatches[index]) > result.alignedPairs.back().rightIndex))
+		if (rightOccurrences.count(leftPath.position[i]) == 0) continue;
+		size_t size = nodeSizes.at(leftPath.position[i].id);
+		for (auto j : rightOccurrences.at(leftPath.position[i]))
 		{
-			result.alignedPairs.emplace_back();
-			result.alignedPairs.back().leftIndex = std::get<2>(diagonalMatches[index]);
-			result.alignedPairs.back().rightIndex = std::get<3>(diagonalMatches[index]);
-			matches += std::get<1>(diagonalMatches[index]);
+			int diagonal = (int)leftCumulativePrefixLength[i] - (int)rightCumulativePrefixLength[j];
+			if (diagonal < diagonalMin || diagonal > diagonalMax) continue;
+			if (result.alignedPairs.size() == 0 || (i > result.alignedPairs.back().leftIndex && j > result.alignedPairs.back().rightIndex))
+			{
+				result.alignedPairs.emplace_back();
+				result.alignedPairs.back().leftIndex = i;
+				result.alignedPairs.back().rightIndex = j;
+				matches += size;
+			}
 		}
 	}
-	assert(result.alignedPairs.size() <= bestEnd - bestStart + 1);
-	assert(result.alignedPairs.size() > 0);
+	if (result.alignedPairs.size() == 0)
+	{
+		result.alignmentLength = 0;
+		result.alignmentIdentity = 0;
+		return result;
+	}
 	result.leftStart = result.alignedPairs[0].leftIndex;
 	result.rightStart = result.alignedPairs[0].rightIndex;
 	result.leftEnd = result.alignedPairs.back().leftIndex;
@@ -160,7 +158,12 @@ void induceOverlaps(const std::vector<Path>& paths, const std::unordered_map<int
 	std::unordered_map<NodePos, std::vector<size_t>> crossesNode;
 	for (size_t i = 0; i < paths.size(); i++)
 	{
+		std::unordered_set<NodePos> nodes;
 		for (auto node : paths[i].position)
+		{
+			nodes.insert(node);
+		}
+		for (auto node : nodes)
 		{
 			crossesNode[node].push_back(i);
 		}
@@ -215,12 +218,9 @@ void induceOverlaps(const std::vector<Path>& paths, const std::unordered_map<int
 				}
 				if (i >= paths.size()) break;
 				std::cerr << i << "/" << paths.size() << std::endl;
-				std::unordered_map<size_t, size_t> possibleFwMatches;
-				std::unordered_map<size_t, size_t> possibleBwMatches;
+				std::unordered_set<size_t> possibleFwMatches;
+				std::unordered_set<size_t> possibleBwMatches;
 				auto reversePath = paths[i].Reverse();
-				auto occurrences = getOccurrences(paths[i]);
-				auto reverseOccurrences = getOccurrences(reversePath);
-				auto reverseCumulativePrefixLengths = getCumulativePrefixLength(reversePath, nodeSizes);
 				for (size_t j = 0; j < paths[i].position.size(); j++)
 				{
 					auto node = paths[i].position[j];
@@ -228,7 +228,7 @@ void induceOverlaps(const std::vector<Path>& paths, const std::unordered_map<int
 					for (auto other : crossesNode[node])
 					{
 						if (other <= i) continue;
-						possibleFwMatches[other] += nodeSize;
+						possibleFwMatches.insert(other);
 					}
 				}
 				for (size_t j = 0; j < reversePath.position.size(); j++)
@@ -238,47 +238,52 @@ void induceOverlaps(const std::vector<Path>& paths, const std::unordered_map<int
 					for (auto other : crossesNode[node])
 					{
 						if (other <= i) continue;
-						possibleBwMatches[other] += nodeSize;
+						possibleBwMatches.insert(other);
 					}
 				}
-				for (auto pair : possibleFwMatches)
+				if (possibleFwMatches.size() > 0)
 				{
-					size_t j = pair.first;
-					if (pair.second < minAlnLength) continue;
-					if (i == j) continue;
-					Alignment fwAln;
-					fwAln = approxAlign(paths[j], paths[i], nodeSizes, cumulativePrefixLengths[j], cumulativePrefixLengths[i], occurrences, j, i, mismatchPenalty, bandwidth);
-					if (fwAln.alignmentLength >= minAlnLength && fwAln.alignmentIdentity >= minAlnIdentity)
+					auto occurrences = getOccurrences(paths[i]);
+					for (auto j : possibleFwMatches)
 					{
-						for (size_t k = 0; k < fwAln.alignedPairs.size(); k++)
+						if (i == j) continue;
+						Alignment fwAln;
+						fwAln = approxAlign(paths[j], paths[i], nodeSizes, cumulativePrefixLengths[j], cumulativePrefixLengths[i], occurrences, j, i, mismatchPenalty, bandwidth);
+						if (fwAln.alignmentLength >= minAlnLength && fwAln.alignmentIdentity >= minAlnIdentity)
 						{
-							fwAln.alignedPairs[k].leftReverse = false;
-							fwAln.alignedPairs[k].rightReverse = false;
+							for (size_t k = 0; k < fwAln.alignedPairs.size(); k++)
+							{
+								fwAln.alignedPairs[k].leftReverse = false;
+								fwAln.alignedPairs[k].rightReverse = false;
+							}
+							fwAln.rightReverse = false;
+							writequeue.enqueue(fwAln);
 						}
-						fwAln.rightReverse = false;
-						writequeue.enqueue(fwAln);
 					}
 				}
-				for (auto pair : possibleBwMatches)
+				if (possibleBwMatches.size() > 0)
 				{
-					size_t j = pair.first;
-					if (pair.second < minAlnLength) continue;
-					if (i == j) continue;
-					Alignment bwAln;
-					bwAln = approxAlign(paths[j], reversePath, nodeSizes, cumulativePrefixLengths[j], reverseCumulativePrefixLengths, reverseOccurrences, j, i, mismatchPenalty, bandwidth);
-					if (bwAln.alignmentLength >= minAlnLength && bwAln.alignmentIdentity >= minAlnIdentity)
+					auto reverseOccurrences = getOccurrences(reversePath);
+					auto reverseCumulativePrefixLengths = getCumulativePrefixLength(reversePath, nodeSizes);
+					for (auto j : possibleBwMatches)
 					{
-						bwAln.rightStart = paths[i].position.size() - 1 - bwAln.rightStart;
-						bwAln.rightEnd = paths[i].position.size() - 1 - bwAln.rightEnd;
-						std::swap(bwAln.rightStart, bwAln.rightEnd);
-						for (size_t k = 0; k < bwAln.alignedPairs.size(); k++)
+						if (i == j) continue;
+						Alignment bwAln;
+						bwAln = approxAlign(paths[j], reversePath, nodeSizes, cumulativePrefixLengths[j], reverseCumulativePrefixLengths, reverseOccurrences, j, i, mismatchPenalty, bandwidth);
+						if (bwAln.alignmentLength >= minAlnLength && bwAln.alignmentIdentity >= minAlnIdentity)
 						{
-							bwAln.alignedPairs[k].leftReverse = false;
-							bwAln.alignedPairs[k].rightReverse = true;
-							bwAln.alignedPairs[k].rightIndex = paths[i].position.size() - 1 - bwAln.alignedPairs[k].rightIndex;
+							bwAln.rightStart = paths[i].position.size() - 1 - bwAln.rightStart;
+							bwAln.rightEnd = paths[i].position.size() - 1 - bwAln.rightEnd;
+							std::swap(bwAln.rightStart, bwAln.rightEnd);
+							for (size_t k = 0; k < bwAln.alignedPairs.size(); k++)
+							{
+								bwAln.alignedPairs[k].leftReverse = false;
+								bwAln.alignedPairs[k].rightReverse = true;
+								bwAln.alignedPairs[k].rightIndex = paths[i].position.size() - 1 - bwAln.alignedPairs[k].rightIndex;
+							}
+							bwAln.rightReverse = true;
+							writequeue.enqueue(bwAln);
 						}
-						bwAln.rightReverse = true;
-						writequeue.enqueue(bwAln);
 					}
 				}
 			}
