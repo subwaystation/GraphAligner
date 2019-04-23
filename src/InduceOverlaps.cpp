@@ -30,17 +30,18 @@ size_t getDiagonalLength(int offset, int width, int height)
 
 Alignment approxAlign(const Path& leftPath, const Path& rightPath, const std::unordered_map<int, size_t>& nodeSizes, const std::vector<size_t>& leftCumulativePrefixLength, const std::vector<size_t>& rightCumulativePrefixLength, const std::unordered_map<NodePos, std::vector<size_t>>& rightOccurrences, size_t left, size_t right, double mismatchPenalty, int bandwidth)
 {
-	std::vector<std::pair<int, size_t>> diagonalMatches;
+	std::vector<std::tuple<int, size_t, size_t, size_t>> diagonalMatches;
 	for (size_t i = 0; i < leftPath.position.size(); i++)
 	{
 		if (rightOccurrences.count(leftPath.position[i]) == 0) continue;
 		size_t size = nodeSizes.at(leftPath.position[i].id);
 		for (auto j : rightOccurrences.at(leftPath.position[i]))
 		{
-			diagonalMatches.emplace_back((int)leftCumulativePrefixLength[i] - (int)rightCumulativePrefixLength[j], size);
+			assert(j < rightPath.position.size());
+			diagonalMatches.emplace_back((int)leftCumulativePrefixLength[i] - (int)rightCumulativePrefixLength[j], size, i, j);
 		}
 	}
-	std::sort(diagonalMatches.begin(), diagonalMatches.end(), [](const std::pair<int, size_t>& left, const std::pair<int, size_t>& right) { return left.first < right.first; });
+	std::sort(diagonalMatches.begin(), diagonalMatches.end(), [](const std::tuple<int, size_t, size_t, size_t>& left, const std::tuple<int, size_t, size_t, size_t>& right) { return std::get<0>(left) < std::get<0>(right); });
 	if (diagonalMatches.size() == 0)
 	{
 		Alignment result;
@@ -50,19 +51,19 @@ Alignment approxAlign(const Path& leftPath, const Path& rightPath, const std::un
 	}
 	size_t start = 0;
 	size_t end = 0;
-	size_t matchesHere = diagonalMatches[0].second;
+	size_t matchesHere = std::get<1>(diagonalMatches[0]);
 	size_t bestStart = -1;
 	size_t bestEnd = -1;
 	double bestScore = 0;
 	while (start < diagonalMatches.size())
 	{
-		while (end < diagonalMatches.size()-1 && diagonalMatches[end+1].first <= diagonalMatches[start].first + bandwidth)
+		while (end < diagonalMatches.size()-1 && std::get<0>(diagonalMatches[end+1]) <= std::get<0>(diagonalMatches[start]) + bandwidth)
 		{
 			end++;
-			matchesHere += diagonalMatches[end].second;
+			matchesHere += std::get<1>(diagonalMatches[end]);
 		}
 		assert(end >= start);
-		int middle = (diagonalMatches[start].first + diagonalMatches[end].first) / 2.0;
+		int middle = (std::get<0>(diagonalMatches[start]) + std::get<0>(diagonalMatches[end])) / 2.0;
 		size_t alignmentLength = getDiagonalLength(middle, leftCumulativePrefixLength.back(), rightCumulativePrefixLength.back());
 		double estimatedScoreHere = matchesHere;
 		if (matchesHere < alignmentLength) estimatedScoreHere -= (double)(alignmentLength - matchesHere) * mismatchPenalty;
@@ -72,13 +73,13 @@ Alignment approxAlign(const Path& leftPath, const Path& rightPath, const std::un
 			bestEnd = end;
 			bestScore = estimatedScoreHere;
 		}
-		while (start < diagonalMatches.size()-1 && diagonalMatches[start+1].first == diagonalMatches[start].first)
+		while (start < diagonalMatches.size()-1 && std::get<0>(diagonalMatches[start+1]) == std::get<0>(diagonalMatches[start]))
 		{
-			matchesHere -= diagonalMatches[start].second;
+			matchesHere -= std::get<1>(diagonalMatches[start]);
 			start++;
 		}
 		assert(start < diagonalMatches.size());
-		matchesHere -= diagonalMatches[start].second;
+		matchesHere -= std::get<1>(diagonalMatches[start]);
 		start++;
 	}
 	if (bestStart == -1 || bestEnd == -1)
@@ -94,22 +95,15 @@ Alignment approxAlign(const Path& leftPath, const Path& rightPath, const std::un
 	result.leftPath = left;
 	result.rightPath = right;
 	size_t matches = 0;
-	for (size_t i = 0; i < leftPath.position.size(); i++)
+	std::sort(diagonalMatches.begin()+bestStart, diagonalMatches.begin()+bestEnd+1, [](const std::tuple<int, size_t, size_t, size_t>& left, const std::tuple<int, size_t, size_t, size_t>& right) { return std::get<2>(left) < std::get<2>(right) || (std::get<2>(left) == std::get<2>(right) && std::get<3>(left) < std::get<3>(right)); });
+	for (size_t index = bestStart; index <= bestEnd; index++)
 	{
-		if (rightOccurrences.count(leftPath.position[i]) == 0) continue;
-		size_t size = nodeSizes.at(leftPath.position[i].id);
-		for (auto j : rightOccurrences.at(leftPath.position[i]))
+		if (result.alignedPairs.size() == 0 || (std::get<2>(diagonalMatches[index]) > result.alignedPairs.back().leftIndex && std::get<3>(diagonalMatches[index]) > result.alignedPairs.back().rightIndex))
 		{
-			int diagonalHere = (int)leftCumulativePrefixLength[i] - (int)rightCumulativePrefixLength[j];
-			if (diagonalHere < diagonalMatches[bestStart].first) continue;
-			if (diagonalHere > diagonalMatches[bestEnd].first) continue;
-			if (result.alignedPairs.size() == 0 || (i > result.alignedPairs.back().leftIndex && j > result.alignedPairs.back().rightIndex))
-			{
-				result.alignedPairs.emplace_back();
-				result.alignedPairs.back().leftIndex = i;
-				result.alignedPairs.back().rightIndex = j;
-				matches += nodeSizes.at(leftPath.position[i].id);
-			}
+			result.alignedPairs.emplace_back();
+			result.alignedPairs.back().leftIndex = std::get<2>(diagonalMatches[index]);
+			result.alignedPairs.back().rightIndex = std::get<3>(diagonalMatches[index]);
+			matches += std::get<1>(diagonalMatches[index]);
 		}
 	}
 	assert(result.alignedPairs.size() <= bestEnd - bestStart + 1);
