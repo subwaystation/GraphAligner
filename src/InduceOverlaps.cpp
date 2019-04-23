@@ -312,7 +312,7 @@ int main(int argc, char** argv)
 	double mismatchPenalty = 10000;
 	if (minAlnIdentity < 1.0)
 	{
-		mismatchPenalty = 1.0 / (1.0 - minAlnIdentity);
+		mismatchPenalty = minAlnIdentity / (1.0 - minAlnIdentity);
 	}
 
 	std::unordered_map<int, size_t> nodeSizes;
