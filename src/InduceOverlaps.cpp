@@ -168,6 +168,21 @@ void induceOverlaps(const std::vector<Path>& paths, const std::unordered_map<int
 			crossesNode[node].push_back(i);
 		}
 	}
+	std::cerr << crossesNode.size() << " crossnodes before repeat filtering" << std::endl;
+	{
+		std::vector<std::pair<NodePos, size_t>> abundances;
+		for (auto pair : crossesNode)
+		{
+			abundances.emplace_back(pair.first, pair.second.size());
+		}
+		std::sort(abundances.begin(), abundances.end(), [](const std::pair<NodePos, size_t>& left, const std::pair<NodePos, size_t>& right) { return left.second < right.second; });
+		for (auto pair : abundances)
+		{
+			if (pair.second <= abundances[abundances.size()/2].second * 5) continue;
+			crossesNode.erase(pair.first);
+		}
+	}
+	std::cerr << crossesNode.size() << " crossnodes after repeat filtering" << std::endl;
 	std::vector<std::vector<size_t>> cumulativePrefixLengths;
 	cumulativePrefixLengths.resize(paths.size());
 	for (size_t i = 0; i < paths.size(); i++)
