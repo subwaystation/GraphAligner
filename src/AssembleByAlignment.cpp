@@ -542,6 +542,8 @@ ClosureEdges getClosureEdges(const DoublestrandedTransitiveClosureMapping& closu
 	{
 		for (size_t j = 1; j < paths[i].position.size(); j++)
 		{
+			if (closures.mapping.count(std::make_pair(i, j-1)) == 0) continue;
+			if (closures.mapping.count(std::make_pair(i, j)) == 0) continue;
 			NodePos oldPos = closures.mapping.at(std::make_pair(i, j-1));
 			NodePos newPos = closures.mapping.at(std::make_pair(i, j));
 			result.coverage[canon(oldPos, newPos)] += 1;
@@ -695,28 +697,28 @@ void outputRemappedReads(std::string filename, const std::vector<Path>& paths, c
 	std::vector<vg::Alignment> alns;
 	for (size_t i = 0; i < paths.size(); i++)
 	{
-		std::vector<std::vector<NodePos>> validSubpaths;
-		validSubpaths.emplace_back();
+		std::vector<NodePos> translated;
 		for (size_t j = 0; j < paths[j].position.size(); j++)
 		{
 			auto key = std::make_pair(i, j);
-			if (closures.mapping.count(key) == 0)
+			if (closures.mapping.count(key) == 0) continue;
+			translated.push_back(closures.mapping.at(key));
+		}
+		if (translated.size() == 0) continue;
+		std::vector<std::vector<NodePos>> validSubpaths;
+		validSubpaths.emplace_back();
+		validSubpaths.back().push_back(translated[0]);
+		for (size_t j = 1; j < translated.size(); j++)
+		{
+			bool hasEdge = edges.coverage.count(canon(translated[j-1], translated[j])) == 1;
+			if (!hasEdge)
 			{
-				if (validSubpaths.back().size() != 0) validSubpaths.emplace_back();
+				assert(validSubpaths.back().size() != 0);
+				validSubpaths.emplace_back();
+				validSubpaths.back().push_back(translated[j]);
 				continue;
 			}
-			if (j > 0)
-			{
-				auto previousKey = std::make_pair(i, j-1);
-				bool broken = false;
-				if (closures.mapping.count(previousKey) == 0) broken = true;
-				else if (edges.coverage.count(canon(closures.mapping.at(previousKey), closures.mapping.at(key))) == 0) broken = true;
-				if (broken)
-				{
-					if (validSubpaths.back().size() != 0) validSubpaths.emplace_back();
-				}
-			}
-			validSubpaths.back().emplace_back(closures.mapping.at(key));
+			validSubpaths.back().push_back(translated[j]);
 		}
 		size_t currentNum = 0;
 		for (size_t j = 0; j < validSubpaths.size(); j++)
@@ -773,12 +775,12 @@ int main(int argc, char** argv)
 		decltype(transitiveClosures) tmp;
 		std::swap(transitiveClosures, tmp);
 	}
-	std::cerr << "get closure edges" << std::endl;
-	auto closureEdges = getClosureEdges(doubleStrandedClosures, paths);
 	std::cerr << "remove wrong coverage closures" << std::endl;
 	doubleStrandedClosures = removeOutsideCoverageClosures(doubleStrandedClosures, 3, 10000);
+	std::cerr << "get closure edges" << std::endl;
+	auto closureEdges = getClosureEdges(doubleStrandedClosures, paths);
 	std::cerr << "bridge tips" << std::endl;
-	std::tie(doubleStrandedClosures, closureEdges) = bridgeTips(doubleStrandedClosures, closureEdges, paths, 2);
+	std::tie(doubleStrandedClosures, closureEdges) = bridgeTips(doubleStrandedClosures, closureEdges, paths, 3);
 	// std::cerr << "insert middles" << std::endl;
 	// doubleStrandedClosures = insertMiddles(doubleStrandedClosures, paths);
 	std::cerr << "remove chimeric edges" << std::endl;
