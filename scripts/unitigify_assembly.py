@@ -72,6 +72,7 @@ def get_circular_unitig(pos):
 		revnextpos = reverse(nextpos)
 		overlap = getset(graph.edges[pos])[1][0]
 		assert len(graph.edges[revnextpos]) == 1
+		assert nextpos[0] != pos[0]
 		pos = nextpos
 		assert pos[0] not in unitig_mapping
 		unitig_mapping[pos[0]] = (next_unitig, pos[1])
@@ -86,12 +87,12 @@ for node in graph.nodes:
 	n = graph.nodes[node]
 	fwpos = (n.nodeid, True)
 	bwpos = (n.nodeid, False)
-	if len(graph.edges[bwpos]) != 1 or getset(graph.edges[bwpos])[0][0] == n:
+	if len(graph.edges[bwpos]) != 1 or getset(graph.edges[bwpos])[0][0] == n.nodeid:
 		if n.nodeid not in unitig_mapping: get_unitig(fwpos)
 		for target in graph.edges[bwpos]:
 			if target[0][0] in unitig_mapping: continue
 			get_unitig(target[0])
-	if len(graph.edges[fwpos]) != 1 or getset(graph.edges[fwpos])[0][0] == n:
+	if len(graph.edges[fwpos]) != 1 or getset(graph.edges[fwpos])[0][0] == n.nodeid:
 		if n.nodeid not in unitig_mapping: get_unitig(bwpos)
 		for target in graph.edges[fwpos]:
 			if target[0][0] in unitig_mapping: continue
