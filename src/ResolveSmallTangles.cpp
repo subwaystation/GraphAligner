@@ -132,10 +132,10 @@ std::vector<ResolvableComponent> getComponents(const GfaGraph& graph, const std:
 		auto firstKey = std::make_pair(edge.first, edge.second[0]);
 		for (auto target : edge.second)
 		{
-			auto keyHere = std::make_pair(edge.first, target);
-			auto reverseKeyHere = std::make_pair(target.Reverse(), edge.first.Reverse());
 			// either all out-edges lead to the same chain or all of them lead to a different one
 			if (belongsToChain.at(edge.first.id) == belongsToChain.at(target.id) && safeChains.count(belongsToChain.at(edge.first.id)) == 1) break;
+			auto keyHere = std::make_pair(edge.first, target);
+			auto reverseKeyHere = std::make_pair(target.Reverse(), edge.first.Reverse());
 			merge(parent, firstKey, keyHere);
 			merge(parent, keyHere, reverseKeyHere);
 		}
@@ -145,6 +145,8 @@ std::vector<ResolvableComponent> getComponents(const GfaGraph& graph, const std:
 			{
 				for (auto target : graph.edges.at(edge.first.Reverse()))
 				{
+					// either all out-edges lead to the same chain or all of them lead to a different one
+					if (belongsToChain.at(edge.first.id) == belongsToChain.at(target.id) && safeChains.count(belongsToChain.at(edge.first.id)) == 1) break;
 					auto keyHere = std::make_pair(edge.first.Reverse(), target);
 					auto reverseKeyHere = std::make_pair(target.Reverse(), edge.first);
 					merge(parent, firstKey, keyHere);
@@ -184,6 +186,7 @@ std::vector<ResolvableComponent> getComponents(const GfaGraph& graph, const std:
 			componentNum -= 1;
 			result[componentNum].edges.insert(keyHere);
 			if (safeChains.count(belongsToChain.at(edge.first.id)) == 0) result[componentNum].nodeIDs.insert(edge.first.id);
+			if (safeChains.count(belongsToChain.at(target.id)) == 0) result[componentNum].nodeIDs.insert(target.id);
 		}
 	}
 	while (result.size() > 0 && result[0].edges.size() == 0)
@@ -286,25 +289,55 @@ bool canResolve(const std::vector<Subpath>& pathsPerComponent, const ResolvableC
 		safeCrossingPerSafe[path.path[0].id] += 1;
 		safeCrossingPerSafe[path.path.back().id] += 1;
 	}
-	std::cerr << component.edges.begin()->first.id << " ";
-	if (totalSafeCrossing < pathsPerComponent.size() * 0.5)
+	std::unordered_set<int> nodeids = component.nodeIDs;
+	for (auto node : nodeids)
+	{
+		if (safeChains.count(belongsToChain.at(node)) == 1)
+		{
+			std::cerr << "(" << node << ") ";
+		}
+		else
+		{
+			std::cerr << node << " ";
+		}
+	}
+	if (pathsPerComponent.size() == 0)
+	{
+		std::cerr << "cannot resolve, zero paths" << std::endl;
+		return false;
+	}
+	if (totalSafeCrossing < pathsPerComponent.size() * 1)
 	{
 		std::cerr << "cannot resolve, too few total safe crossers (" << totalSafeCrossing << ", " << pathsPerComponent.size() << ")" << std::endl;
 		return false;
 	}
+	for (auto edge : component.edges)
+	{
+		if (safeChains.count(belongsToChain.at(edge.first.id)) == 1 && (safeCrossingPerSafe.count(edge.first.id) == 0 || safeCrossingPerSafe.at(edge.first.id) == 0))
+		{
+			std::cerr << "cannot resolve, zero safe crossers for node " << edge.first.id;
+			return false;
+		}
+		if (safeChains.count(belongsToChain.at(edge.second.id)) == 1 && (safeCrossingPerSafe.count(edge.second.id) == 0 || safeCrossingPerSafe.at(edge.second.id) == 0))
+		{
+			std::cerr << "cannot resolve, zero safe crossers for node " << edge.second.id;
+			return false;
+		}
+	}
 	for (auto pair : pathsCrossingPerSafe)
 	{
-		if (safeCrossingPerSafe.count(pair.first) == 0)
+		if (safeCrossingPerSafe.count(pair.first) == 0 || safeCrossingPerSafe.at(pair.first) == 0)
 		{
 			std::cerr << "cannot resolve, zero safe crossers for node " << pair.first;
 			return false;
 		}
-		if (safeCrossingPerSafe.at(pair.first) < pair.second * 0.5)
+		if (safeCrossingPerSafe.at(pair.first) < pair.second * 1)
 		{
 			std::cerr << "cannot resolve, too few safe crossers for node " << pair.first << " (" << totalSafeCrossing << ", " << pathsPerComponent.size() << ")" << std::endl;
 			return false;
 		}
 	}
+	std::cerr << "resolve" << std::endl;
 	return true;
 }
 
@@ -404,6 +437,8 @@ void resolve(int& nextNodeId, const std::unordered_map<int, size_t>& nodeSizes, 
 	std::unordered_map<std::pair<NodePos, NodePos>, std::vector<size_t>> subpathsPerConnection;
 	for (size_t i = 0; i < pathsPerComponent.size(); i++)
 	{
+		assert(safeChains.count(belongsToChain.at(pathsPerComponent[i].path[0].id)) == 1);
+		assert(safeChains.count(belongsToChain.at(pathsPerComponent[i].path.back().id)) == 1);
 		if (safeChains.count(belongsToChain.at(pathsPerComponent[i].path[0].id)) == 0) continue;
 		if (safeChains.count(belongsToChain.at(pathsPerComponent[i].path.back().id)) == 0) continue;
 		subpathsPerConnection[canon(pathsPerComponent[i].path[0], pathsPerComponent[i].path.back())].push_back(i);
@@ -420,9 +455,9 @@ void resolve(int& nextNodeId, const std::unordered_map<int, size_t>& nodeSizes, 
 				{
 					pathsPerComponent[i].path[j] = pathsPerComponent[i].path[j].Reverse();
 				}
-				assert(pathsPerComponent[i].path[0] == pair.first.first);
-				assert(pathsPerComponent[i].path.back() == pair.first.second);
 			}
+			assert(pathsPerComponent[i].path[0] == pair.first.first);
+			assert(pathsPerComponent[i].path.back() == pair.first.second);
 		}
 		std::vector<std::pair<int, NodePos>> nodes;
 		std::list<size_t> order;
@@ -513,6 +548,7 @@ void updateGraph(GfaGraph& graph, const ResolvableComponent& component, const st
 {
 	for (auto node : component.newNodes)
 	{
+		assert(safeChains.count(belongsToChain.at(node.second.id)) == 0);
 		assert(graph.nodes.count(node.first) == 0);
 		assert(graph.nodes.count(node.second.id) == 1);
 		std::string seq = graph.nodes.at(node.second.id);
@@ -521,6 +557,8 @@ void updateGraph(GfaGraph& graph, const ResolvableComponent& component, const st
 	}
 	for (auto edge : component.newEdges)
 	{
+		assert(graph.nodes.count(edge.first.id) == 1);
+		assert(graph.nodes.count(edge.second.id) == 1);
 		graph.edges[edge.first].push_back(edge.second);
 		NodePos oldFrom = edge.first;
 		if (belongsToChain.count(oldFrom.id) == 0 || safeChains.count(belongsToChain.at(oldFrom.id)) == 0) oldFrom = component.newNodes.at(oldFrom.id);
@@ -532,6 +570,7 @@ void updateGraph(GfaGraph& graph, const ResolvableComponent& component, const st
 	}
 	for (auto node : component.nodeIDs)
 	{
+		assert(safeChains.count(belongsToChain.at(node)) == 0);
 		graph.nodes.erase(node);
 	}
 }
