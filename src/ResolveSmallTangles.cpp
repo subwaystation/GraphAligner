@@ -290,6 +290,11 @@ bool canResolve(const std::vector<Subpath>& pathsPerComponent, const ResolvableC
 		safeCrossingPerSafe[path.path.back().id] += 1;
 	}
 	std::unordered_set<int> nodeids = component.nodeIDs;
+	for (auto edge : component.edges)
+	{
+		nodeids.insert(edge.first.id);
+		nodeids.insert(edge.second.id);
+	}
 	for (auto node : nodeids)
 	{
 		if (safeChains.count(belongsToChain.at(node)) == 1)
