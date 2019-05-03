@@ -311,7 +311,7 @@ bool canResolve(const std::vector<Subpath>& pathsPerComponent, const ResolvableC
 		std::cerr << "cannot resolve, zero paths" << std::endl;
 		return false;
 	}
-	if (totalSafeCrossing < pathsPerComponent.size() * 1)
+	if (totalSafeCrossing < pathsPerComponent.size() * 0.5)
 	{
 		std::cerr << "cannot resolve, too few total safe crossers (" << totalSafeCrossing << ", " << pathsPerComponent.size() << ")" << std::endl;
 		return false;
@@ -336,7 +336,7 @@ bool canResolve(const std::vector<Subpath>& pathsPerComponent, const ResolvableC
 			std::cerr << "cannot resolve, zero safe crossers for node " << pair.first;
 			return false;
 		}
-		if (safeCrossingPerSafe.at(pair.first) < pair.second * 1)
+		if (safeCrossingPerSafe.at(pair.first) < pair.second * 0.5)
 		{
 			std::cerr << "cannot resolve, too few safe crossers for node " << pair.first << " (" << totalSafeCrossing << ", " << pathsPerComponent.size() << ")" << std::endl;
 			return false;
@@ -442,8 +442,6 @@ void resolve(int& nextNodeId, const std::unordered_map<int, size_t>& nodeSizes, 
 	std::unordered_map<std::pair<NodePos, NodePos>, std::vector<size_t>> subpathsPerConnection;
 	for (size_t i = 0; i < pathsPerComponent.size(); i++)
 	{
-		assert(safeChains.count(belongsToChain.at(pathsPerComponent[i].path[0].id)) == 1);
-		assert(safeChains.count(belongsToChain.at(pathsPerComponent[i].path.back().id)) == 1);
 		if (safeChains.count(belongsToChain.at(pathsPerComponent[i].path[0].id)) == 0) continue;
 		if (safeChains.count(belongsToChain.at(pathsPerComponent[i].path.back().id)) == 0) continue;
 		subpathsPerConnection[canon(pathsPerComponent[i].path[0], pathsPerComponent[i].path.back())].push_back(i);
@@ -613,11 +611,6 @@ void resolveComponentsAndReplacePaths(GfaGraph& graph, const std::unordered_set<
 			size_t nodeSize = graph.nodes.at(node).size();
 			if (nodeSize > graph.edgeOverlap) nodeSize -= graph.edgeOverlap;
 			size += nodeSize;
-		}
-		if (size > 5000)
-		{
-			tooBigs += 1;
-			continue;
 		}
 		if (!canResolve(pathsPerComponent[i], components[i], safeChains, belongsToChain))
 		{
