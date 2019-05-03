@@ -137,22 +137,22 @@ rule topofy:
 
 rule snarls:
 	input: TMPDIR + "{graph}-topo.vg"
-	output: temp(TMPDIR + "{graph}-traversals.travs")
-	shell: "{VGPATH} snarls -r {output} -m 1000 {input} > /dev/null"
+	output: temp(TMPDIR + "{graph}-snarls.pb")
+	shell: "{VGPATH} snarls -o {input} > {output}"
 
-rule fix_traversals:
-	input: TMPDIR + "{graph}-traversals.travs"
-	output: temp(TMPDIR + "{graph}-traversals.json")
-	shell: "{VGPATH} view -E {input} | sed 's/$/,/g' | sed '1 s/^/[/g' | sed '$ s/,$/]/g' > {output}"
+rule fix_snarls:
+	input: TMPDIR + "{graph}-snarls.pb"
+	output: temp(TMPDIR + "{graph}-snarls.json")
+	shell: "{VGPATH} view -R {input} | sed 's/$/,/g' | sed '1 s/^/[/g' | sed '$ s/,$/]/g' > {output}"
 
 rule make_chains:
 	input:
 		graph = TMPDIR + "{graph}.gfa",
-		traversals = TMPDIR + "{graph}-traversals.json"
+		snarls = TMPDIR + "{graph}-snarls.json"
 	output:
 		graph_withchains = temp(TMPDIR + "{graph}-withchains.gfa"),
 		chains = temp(TMPDIR + "{graph}-chains.gfa")
-	shell: "{ALIGNERSCRIPTDIR}make_chain_graph.py {input.graph} {input.traversals} {output.graph_withchains} {output.chains}"
+	shell: "{ALIGNERSCRIPTDIR}make_chain_graph.py {input.graph} {input.snarls} {output.graph_withchains} {output.chains}"
 
 rule resolve_small_cycles:
 	input: TMPDIR + "{graph}.gfa",

@@ -5,7 +5,7 @@ import sys
 from Gfa import *
 
 ingraph = sys.argv[1]
-insnarlstraversals = sys.argv[2]
+insnarls = sys.argv[2]
 outgraph = sys.argv[3]
 outchains = sys.argv[4]
 
@@ -13,8 +13,8 @@ graph = Graph()
 graph.load(ingraph)
 graph.remove_nonexistent_edges()
 
-with open(insnarlstraversals) as f:
-	travs = json.load(f)
+with open(insnarls) as f:
+	snarls = json.load(f)
 
 trav_edges = set()
 parent = {}
@@ -39,18 +39,27 @@ def merge(k1, k2):
 for n in graph.nodes:
 	parent[n] = n
 
-for trav in travs:
+for snarl in snarls:
+	if "type" not in snarl: continue
+	if snarl["type"] not in ["ULTRABUBBLE"]: continue
 	prev = None
+	start_node = (snarl["start"]["node_id"], not ("backward" in snarl["start"]))
+	end_node = (snarl["end"]["node_id"], not ("backward" in snarl["end"]))
 	nodes = []
-	for n in trav["visit"]:
-		if "node_id" in n:
-			current = (n["node_id"], not ("backward" in n))
-			nodes.append(n["node_id"])
-			assert current[0] in graph.nodes
-			if prev:
-				trav_edges.add((prev, current))
-				trav_edges.add((reverse(current), reverse(prev)))
-			prev = current
+	visit_stack = [start_node]
+	while len(visit_stack) > 0:
+		pos = visit_stack.pop()
+		nodes.append(pos[0])
+		if pos == end_node: continue
+		if pos in graph.edges:
+			for edge in graph.edges[pos]:
+				target = edge[0]
+				if (pos, target) in trav_edges: continue
+				if (reverse(target), reverse(pos)) in trav_edges: continue
+				trav_edges.add((pos, target))
+				trav_edges.add((reverse(target), reverse(pos)))
+				visit_stack.append(target)
+	assert len(nodes) > 0
 	for n in nodes:
 		assert nodes[0] in graph.nodes
 		assert n in graph.nodes
