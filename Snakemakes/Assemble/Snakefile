@@ -130,20 +130,10 @@ rule untip:
 	output: temp(TMPDIR + "{graph}-untip.gfa")
 	shell: "{ALIGNERBINDIR}UntipRelative 1000 2000 0.01 < {input} > {output}"
 
-rule topofy:
+rule find_bubbles:
 	input: TMPDIR + "{graph}.gfa"
-	output: temp(TMPDIR + "{graph}-topo.vg")
-	shell: "{ALIGNERSCRIPTDIR}filter_unconnected_nodes.py {input} /dev/stdout | sed 's/[0-9]\\+M/0M/g' | {VGPATH} view -Fv - > {output}"
-
-rule snarls:
-	input: TMPDIR + "{graph}-topo.vg"
-	output: temp(TMPDIR + "{graph}-snarls.pb")
-	shell: "{VGPATH} snarls -o {input} > {output}"
-
-rule fix_snarls:
-	input: TMPDIR + "{graph}-snarls.pb"
 	output: temp(TMPDIR + "{graph}-snarls.json")
-	shell: "{VGPATH} view -R {input} | sed 's/$/,/g' | sed '1 s/^/[/g' | sed '$ s/,$/]/g' > {output}"
+	shell: "{ALIGNERSCRIPTDIR}find_ultrabubbles.py {input} | sed 's/$/,/g' | sed '1 s/^/[/g' | sed '$ s/,$/]/g' > {output}"
 
 rule make_chains:
 	input:

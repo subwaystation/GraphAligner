@@ -43,22 +43,26 @@ for snarl in snarls:
 	if "type" not in snarl: continue
 	if snarl["type"] not in ["ULTRABUBBLE"]: continue
 	prev = None
-	start_node = (snarl["start"]["node_id"], not ("backward" in snarl["start"]))
-	end_node = (snarl["end"]["node_id"], not ("backward" in snarl["end"]))
+	start_node = (snarl["start"]["node_id"], not (("backward" in snarl["start"]) and snarl["start"]["backward"] == True))
+	end_node = (snarl["end"]["node_id"], not (("backward" in snarl["end"]) and snarl["end"]["backward"] == True))
 	nodes = []
 	visit_stack = [start_node]
+	trav_here = set()
 	while len(visit_stack) > 0:
 		pos = visit_stack.pop()
 		nodes.append(pos[0])
 		if pos == end_node: continue
-		if pos in graph.edges:
-			for edge in graph.edges[pos]:
-				target = edge[0]
-				if (pos, target) in trav_edges: continue
-				if (reverse(target), reverse(pos)) in trav_edges: continue
-				trav_edges.add((pos, target))
-				trav_edges.add((reverse(target), reverse(pos)))
-				visit_stack.append(target)
+		assert pos in graph.edges
+		for edge in graph.edges[pos]:
+			target = edge[0]
+			if (pos, target) in trav_here:
+				assert (reverse(target), reverse(pos)) in trav_here
+				continue
+			assert (reverse(target), reverse(pos)) not in trav_here
+			trav_here.add((pos, target))
+			trav_here.add((reverse(target), reverse(pos)))
+			visit_stack.append(target)
+	trav_edges = trav_edges.union(trav_here)
 	assert len(nodes) > 0
 	for n in nodes:
 		assert nodes[0] in graph.nodes
