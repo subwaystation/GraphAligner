@@ -785,6 +785,7 @@ int main(int argc, char** argv)
 	// doubleStrandedClosures = insertMiddles(doubleStrandedClosures, paths);
 	std::cerr << "remove chimeric edges" << std::endl;
 	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 5, 0.2);
+	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 10, 0.1);
 	std::cerr << "determine closure overlaps" << std::endl;
 	closureEdges = determineClosureOverlaps(paths, doubleStrandedClosures, closureEdges, graph);
 	std::cerr << "graphify" << std::endl;
