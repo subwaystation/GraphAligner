@@ -48,8 +48,9 @@ def detect_bubble(s):
 			if not has_nonvisited_parent: S.append(u)
 		if len(S) == 1 and len(seen) == 1 and S[0] == getset(seen):
 			t = S.pop()
-			for edge in graph.edges[t]:
-				if edge[0] == t: return None
+			if t in graph.edges:
+				for edge in graph.edges[t]:
+					if edge[0] == s: return None
 			return (s, t)
 	return None
 
