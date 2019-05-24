@@ -24,14 +24,16 @@ SHORTREADNAMES = [n.split('.')[0] for n in SHORTREADS]
 SHORTREADEXTENSIONS = ['.'.join(n.split('.')[1:]) for n in SHORTREADS]
 
 wildcard_constraints:
-	graph = "assembly((-unitig)|(-untip)|(-topo)|(-withchains)|(-repeat)|(-cycle))*"
+	graph = "assembly((-unitig)|(-untip)|(-topo)|(-withchains)|(-repeat)|(-cycle)|(-collapsed))*"
 
 rule all:
 	input:
 		OUTDIR + "assembly.gfa",
 		OUTDIR + "chains.gfa",
+		OUTDIR + "assembly_collapsed.gfa",
 		OUTDIR + "nodeinfo_assembly.csv",
-		OUTDIR + "nodeinfo_chains.csv"
+		OUTDIR + "nodeinfo_chains.csv",
+		OUTDIR + "nodeinfo_collapsed.csv"
 
 rule correct_short_reads:
 	input:
@@ -144,6 +146,14 @@ rule make_chains:
 		chains = temp(TMPDIR + "{graph}-chains.gfa")
 	shell: "{ALIGNERSCRIPTDIR}make_chain_graph.py {input.graph} {input.snarls} {output.graph_withchains} {output.chains}"
 
+rule collapse_graph:
+	input:
+		graph = TMPDIR + "{graph}-withchains.gfa",
+		snarls = TMPDIR + "{graph}-snarls.json"
+	output:
+		graph_collapsed = temp(TMPDIR + "{graph}-collapsed.gfa")
+	shell: "{ALIGNERSCRIPTDIR}arbitrarily_collapse_bubbles.py {input.graph} {input.snarls} {output.graph_collapsed}"
+
 rule resolve_small_cycles:
 	input: TMPDIR + "{graph}.gfa",
 	output: temp(TMPDIR + "{graph}-cycle.gfa")
@@ -165,14 +175,22 @@ rule resolve_small_tangles:
 
 rule final:
 	input:
+		graph_collapsed = TMPDIR + "assembly-untip-unitig-repeat-unitig-cycle-unitig-collapsed-unitig.gfa",
 		graph_withchains = TMPDIR + "assembly-untip-unitig-repeat-unitig-cycle-unitig-withchains.gfa",
 		graph_chains = TMPDIR + "assembly-untip-unitig-repeat-unitig-cycle-unitig-chains.gfa"
 	output:
+		graph_collapsed = OUTDIR + "assembly_collapsed.gfa",
 		graph_withchains = OUTDIR + "assembly.gfa",
 		graph_chains = OUTDIR + "chains.gfa"
 	run:
+		shell("cp {input.graph_collapsed} {output.graph_collapsed}"),
 		shell("cp {input.graph_withchains} {output.graph_withchains}"),
 		shell("cp {input.graph_chains} {output.graph_chains}")
+
+rule nodeinfo_collapsed:
+	input: rules.final.output.graph_collapsed
+	output: OUTDIR + "nodeinfo_collapsed.csv"
+	shell: "{ALIGNERSCRIPTDIR}graph_infocsv.py < {input} > {output}"
 
 rule nodeinfo_assembly:
 	input: rules.final.output.graph_withchains
