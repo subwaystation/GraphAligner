@@ -3,6 +3,16 @@
 #include "GfaGraph.h"
 #include "CommonUtils.h"
 
+namespace std {
+	template <> struct hash<std::pair<int, int>>
+	{
+		size_t operator()(const std::pair<int, int>& pair) const
+		{
+			return std::hash<int>()(pair.first) ^ std::hash<int>()(pair.second);
+		}
+	};
+}
+
 std::pair<NodePos, NodePos> canon(NodePos left, NodePos right)
 {
 	if (left.id == right.id)
@@ -80,6 +90,8 @@ struct ResolvableComponent
 {
 	std::unordered_set<int> nodeIDs;
 	std::unordered_set<std::pair<NodePos, NodePos>> edges;
+	std::unordered_set<int> removedNodes;
+	std::unordered_set<std::pair<NodePos, NodePos>> removedEdges;
 	std::unordered_map<int, NodePos> newNodes;
 	std::vector<std::pair<NodePos, NodePos>> newEdges;
 };
@@ -346,6 +358,52 @@ bool canResolve(const std::vector<Subpath>& pathsPerComponent, const ResolvableC
 	return true;
 }
 
+bool canPartiallyResolve(const std::vector<Subpath>& pathsPerComponent, const ResolvableComponent& component, const std::unordered_set<int>& safeChains, const std::unordered_map<int, int>& belongsToChain)
+{
+	size_t totalSafeCrossing = 0;
+	std::unordered_map<int, std::unordered_map<int, size_t>> crossers;
+	std::unordered_map<int, size_t> totalCrossers;
+	for (auto path : pathsPerComponent)
+	{
+		if (safeChains.count(belongsToChain.at(path.path[0].id)) == 1) totalCrossers[path.path[0].id] += 1;
+		if (safeChains.count(belongsToChain.at(path.path.back().id)) == 1) totalCrossers[path.path.back().id] += 1;
+		if (safeChains.count(belongsToChain.at(path.path[0].id)) == 0 || safeChains.count(belongsToChain.at(path.path.back().id)) == 0) continue;
+		crossers[path.path[0].id][path.path.back().id] += 1;
+		crossers[path.path.back().id][path.path[0].id] += 1;
+	}
+	std::unordered_set<std::pair<int, int>> potentiallyResolvable;
+	for (auto pair : crossers)
+	{
+		size_t total = totalCrossers.at(pair.first);
+		assert(total > 0);
+		for (auto other : pair.second)
+		{
+			if (other.second > total * 0.7) potentiallyResolvable.emplace(pair.first, other.first);
+		}
+	}
+	std::vector<std::pair<int, int>> resolvable;
+	for (auto pair : potentiallyResolvable)
+	{
+		if (pair.second < pair.first) continue;
+		if (potentiallyResolvable.count(std::make_pair(pair.second, pair.first)) == 1)
+		{
+			resolvable.push_back(pair);
+		}
+	}
+	if (resolvable.size() > 0)
+	{
+		std::cerr << "can partially resolve";
+		for (auto pair : resolvable)
+		{
+			std::cerr << " " << pair.first << "-" << pair.second;
+		}
+		std::cerr << std::endl;
+		return true;
+	}
+	std::cerr << "cannot partially resolve" << std::endl;
+	return false;
+}
+
 std::vector<std::pair<size_t, size_t>> align(const std::vector<std::pair<int, NodePos>>& nodes, const std::list<size_t>& order, const std::unordered_map<size_t, std::vector<size_t>>& inNeighbors, const std::vector<NodePos>& path, const std::unordered_map<int, size_t>& nodeSizes)
 {
 	std::vector<std::vector<std::pair<size_t, size_t>>> backtrace;
@@ -545,6 +603,162 @@ void resolve(int& nextNodeId, const std::unordered_map<int, size_t>& nodeSizes, 
 			}
 		}
 	}
+	component.removedNodes = component.nodeIDs;
+}
+
+void resolvePartially(int& nextNodeId, const std::unordered_map<int, size_t>& nodeSizes, std::vector<Subpath>& pathsPerComponent, ResolvableComponent& component, const std::unordered_set<int>& safeChains, const std::unordered_map<int, int>& belongsToChain, const GfaGraph& graph)
+{
+	size_t totalSafeCrossing = 0;
+	std::unordered_map<int, std::unordered_map<int, size_t>> crossers;
+	std::unordered_map<int, size_t> totalCrossers;
+	for (auto path : pathsPerComponent)
+	{
+		if (safeChains.count(belongsToChain.at(path.path[0].id)) == 1) totalCrossers[path.path[0].id] += 1;
+		if (safeChains.count(belongsToChain.at(path.path.back().id)) == 1) totalCrossers[path.path.back().id] += 1;
+		if (safeChains.count(belongsToChain.at(path.path[0].id)) == 0 || safeChains.count(belongsToChain.at(path.path.back().id)) == 0) continue;
+		crossers[path.path[0].id][path.path.back().id] += 1;
+		crossers[path.path.back().id][path.path[0].id] += 1;
+	}
+	std::unordered_set<std::pair<int, int>> potentiallyResolvable;
+	for (auto pair : crossers)
+	{
+		size_t total = totalCrossers.at(pair.first);
+		assert(total > 0);
+		for (auto other : pair.second)
+		{
+			if (other.second > total * 0.7) potentiallyResolvable.emplace(pair.first, other.first);
+		}
+	}
+	std::unordered_set<std::pair<int, int>> resolvable;
+	for (auto pair : potentiallyResolvable)
+	{
+		if (pair.second < pair.first) continue;
+		if (potentiallyResolvable.count(std::make_pair(pair.second, pair.first)) == 1)
+		{
+			resolvable.insert(pair);
+		}
+	}
+	assert(resolvable.size() > 0);
+	std::unordered_map<std::pair<NodePos, NodePos>, std::vector<size_t>> subpathsPerConnection;
+	for (size_t i = 0; i < pathsPerComponent.size(); i++)
+	{
+		if (safeChains.count(belongsToChain.at(pathsPerComponent[i].path[0].id)) == 0) continue;
+		if (safeChains.count(belongsToChain.at(pathsPerComponent[i].path.back().id)) == 0) continue;
+		auto key = canon(pathsPerComponent[i].path[0], pathsPerComponent[i].path.back());
+		std::pair<int, int> check { key.first.id, key.second.id };
+		if (resolvable.count(check) == 0) continue;
+		subpathsPerConnection[key].push_back(i);
+	}
+	assert(subpathsPerConnection.size() == resolvable.size());
+	for (auto pair : subpathsPerConnection)
+	{
+		assert(graph.edges.count(pair.first.first) == 1);
+		assert(graph.edges.count(pair.first.second.Reverse()) == 1);
+		for (auto edge : graph.edges.at(pair.first.first))
+		{
+			component.removedEdges.emplace(pair.first.first, edge);
+		}
+		for (auto edge : graph.edges.at(pair.first.second.Reverse()))
+		{
+			component.removedEdges.emplace(pair.first.second.Reverse(), edge);
+		}
+		assert(pair.second.size() > 0);
+		for (auto i : pair.second)
+		{
+			if (pathsPerComponent[i].path[0] != pair.first.first)
+			{
+				std::reverse(pathsPerComponent[i].path.begin(), pathsPerComponent[i].path.end());
+				for (size_t j = 0; j < pathsPerComponent[i].path.size(); j++)
+				{
+					pathsPerComponent[i].path[j] = pathsPerComponent[i].path[j].Reverse();
+				}
+			}
+			assert(pathsPerComponent[i].path[0] == pair.first.first);
+			assert(pathsPerComponent[i].path.back() == pair.first.second);
+		}
+		std::vector<std::pair<int, NodePos>> nodes;
+		std::list<size_t> order;
+		std::unordered_map<size_t, std::vector<size_t>> inNeighbors;
+		assert(pathsPerComponent[pair.second[0]].path.size() >= 2);
+		for (size_t i = 0; i < pathsPerComponent[pair.second[0]].path.size(); i++)
+		{
+			nodes.emplace_back(nextNodeId, pathsPerComponent[pair.second[0]].path[i]);
+			order.push_back(i);
+			if (i > 0)
+			{
+				inNeighbors[i].push_back(i-1);
+			}
+			nextNodeId++;
+		}
+		for (size_t i = 1; i < pair.second.size(); i++)
+		{
+			auto matches = align(nodes, order, inNeighbors, pathsPerComponent[pair.second[i]].path, nodeSizes);
+			assert(matches.size() >= 2);
+			assert(matches[0].first == 0);
+			assert(matches[0].second == 0);
+			assert(matches.back().first == pathsPerComponent[pair.second[i]].path.size()-1);
+			assert(matches.back().second == *(--order.end()));
+			auto pos = order.begin();
+			for (size_t j = 1; j < matches.size(); j++)
+			{
+				while (*pos != matches[j].second)
+				{
+					++pos;
+					assert(pos != order.end());
+				}
+				size_t lastNode = matches[j-1].second;
+				for (size_t k = matches[j-1].first+1; k < matches[j].first; k++)
+				{
+					order.insert(pos, nodes.size());
+					nodes.emplace_back(nextNodeId, pathsPerComponent[pair.second[i]].path[k]);
+					if (k == matches[j-1].first+1)
+					{
+						inNeighbors[nodes.size()-1].push_back(matches[j-1].second);
+					}
+					else
+					{
+						inNeighbors[nodes.size()-1].push_back(nodes.size()-2);
+					}
+					lastNode = nodes.size()-1;
+					nextNodeId += 1;
+				}
+				inNeighbors[matches[j].second].push_back(lastNode);
+			}
+		}
+		for (size_t i = 0; i < nodes.size(); i++)
+		{
+			if (i == 0 || i == *(--order.end()))
+			{
+				assert(safeChains.count(belongsToChain.at(nodes[i].second.id)) == 1);
+				continue;
+			}
+			assert(safeChains.count(belongsToChain.at(nodes[i].second.id)) == 0);
+			assert(component.newNodes.count(nodes[i].first) == 0);
+			component.newNodes[nodes[i].first] = nodes[i].second;
+		}
+		for (auto pair : inNeighbors)
+		{
+			size_t to = pair.first;
+			for (auto from : pair.second)
+			{
+				NodePos fromPos;
+				NodePos toPos;
+				fromPos.id = nodes[from].first;
+				toPos.id = nodes[to].first;
+				fromPos.end = true;
+				toPos.end = true;
+				if (from == 0)
+				{
+					fromPos = nodes[0].second;
+				}
+				if (to == *(--order.end()))
+				{
+					toPos = nodes[to].second;
+				}
+				component.newEdges.emplace_back(fromPos, toPos);
+			}
+		}
+	}
 }
 
 void updateGraph(GfaGraph& graph, const ResolvableComponent& component, const std::unordered_set<int>& safeChains, const std::unordered_map<int, int>& belongsToChain)
@@ -571,10 +785,37 @@ void updateGraph(GfaGraph& graph, const ResolvableComponent& component, const st
 		if (!edge.second.end) oldTo = oldTo.Reverse();
 		if (graph.varyingOverlaps.count(std::make_pair(oldFrom, oldTo)) == 1) graph.varyingOverlaps[edge] = graph.varyingOverlaps.at(std::make_pair(oldFrom, oldTo));
 	}
-	for (auto node : component.nodeIDs)
+	for (auto node : component.removedNodes)
 	{
 		assert(safeChains.count(belongsToChain.at(node)) == 0);
 		graph.nodes.erase(node);
+	}
+	for (auto edge : component.removedEdges)
+	{
+		if (graph.edges.count(edge.first) == 1)
+		{
+			for (size_t i = 0; i < graph.edges.at(edge.first).size(); i++)
+			{
+				if (graph.edges.at(edge.first)[i] == edge.second)
+				{
+					std::swap(graph.edges.at(edge.first)[i], graph.edges.at(edge.first).back());
+					graph.edges.at(edge.first).pop_back();
+					break;
+				}
+			}
+		}
+		if (graph.edges.count(edge.second.Reverse()) == 1)
+		{
+			for (size_t i = 0; i < graph.edges.at(edge.second.Reverse()).size(); i++)
+			{
+				if (graph.edges.at(edge.second.Reverse())[i] == edge.first.Reverse())
+				{
+					std::swap(graph.edges.at(edge.second.Reverse())[i], graph.edges.at(edge.second.Reverse()).back());
+					graph.edges.at(edge.second.Reverse()).pop_back();
+					break;
+				}
+			}
+		}
 	}
 }
 
@@ -598,6 +839,7 @@ void resolveComponentsAndReplacePaths(GfaGraph& graph, const std::unordered_set<
 	nextNodeId += 1;
 	size_t unresolvableComponents = 0;
 	size_t resolvedComponents = 0;
+	size_t partiallyResolvedComponents = 0;
 	size_t tooBigs = 0;
 	for (size_t i = 0; i < components.size(); i++)
 	{
@@ -612,16 +854,24 @@ void resolveComponentsAndReplacePaths(GfaGraph& graph, const std::unordered_set<
 			if (nodeSize > graph.edgeOverlap) nodeSize -= graph.edgeOverlap;
 			size += nodeSize;
 		}
-		if (!canResolve(pathsPerComponent[i], components[i], safeChains, belongsToChain))
+		if (canResolve(pathsPerComponent[i], components[i], safeChains, belongsToChain))
+		{
+			resolve(nextNodeId, nodeSizes, pathsPerComponent[i], components[i], safeChains, belongsToChain);
+			resolvedComponents += 1;
+			updateGraph(graph, components[i], safeChains, belongsToChain);
+		}
+		else if (canPartiallyResolve(pathsPerComponent[i], components[i], safeChains, belongsToChain))
+		{
+			resolvePartially(nextNodeId, nodeSizes, pathsPerComponent[i], components[i], safeChains, belongsToChain, graph);
+			partiallyResolvedComponents += 1;
+			updateGraph(graph, components[i], safeChains, belongsToChain);
+		}
+		else
 		{
 			unresolvableComponents += 1;
-			continue;
 		}
-		resolve(nextNodeId, nodeSizes, pathsPerComponent[i], components[i], safeChains, belongsToChain);
-		resolvedComponents += 1;
-		updateGraph(graph, components[i], safeChains, belongsToChain);
 	}
-	std::cerr << resolvedComponents << " components resolved, " << unresolvableComponents << " unresolved, " << tooBigs << " too big components" << std::endl;
+	std::cerr << resolvedComponents << " components resolved, " << partiallyResolvedComponents << " partially resolved, " << unresolvableComponents << " unresolved, " << tooBigs << " too big components" << std::endl;
 }
 
 int main(int argc, char** argv)
