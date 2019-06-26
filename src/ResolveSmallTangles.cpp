@@ -25,13 +25,18 @@ std::pair<NodePos, NodePos> canon(NodePos left, NodePos right)
 	return std::make_pair(right.Reverse(), left.Reverse());
 }
 
-std::unordered_set<int> getSafeChains(const GfaGraph& graph, size_t safeChainSize)
+std::unordered_set<int> getSafeChains(const GfaGraph& graph, size_t safeChainSize, size_t genomeSize)
 {
 	std::unordered_map<int, size_t> chainSize;
+	std::unordered_map<int, size_t> chainKmers;
+	size_t totalKmers = 0;
+	size_t totalSize = 0;
 	for (auto tags : graph.tags)
 	{
 		size_t size = 0;
 		int chain = 0;
+		size_t kmers = 0;
+		bool hasKmers = false;
 		bool hasSize = false;
 		bool hasChain = false;
 		std::stringstream sstr { tags.second };
@@ -39,6 +44,12 @@ std::unordered_set<int> getSafeChains(const GfaGraph& graph, size_t safeChainSiz
 		{
 			std::string tag;
 			sstr >> tag;
+			if (tag.substr(0, 5) == "RC:i:")
+			{
+				assert(!hasKmers);
+				hasKmers = true;
+				kmers = std::stol(tag.substr(5));
+			}
 			if (tag.substr(0, 5) == "LN:i:")
 			{
 				assert(!hasSize);
@@ -54,14 +65,21 @@ std::unordered_set<int> getSafeChains(const GfaGraph& graph, size_t safeChainSiz
 		}
 		if (!hasSize || !hasChain) continue;
 		chainSize[chain] += size;
+		chainKmers[chain] += kmers;
+		totalKmers += kmers;
+		totalSize += size;
 	}
+	double averageCoverage = (double)totalKmers / (double)totalSize;
+	std::cerr << "average coverage " << averageCoverage << std::endl;
 	std::unordered_set<int> result;
 	for (auto pair : chainSize)
 	{
-		if (pair.second >= safeChainSize)
-		{
-			result.insert(pair.first);
-		}
+		if (pair.second < safeChainSize) continue;
+		assert(chainKmers.count(pair.first) == 1);
+		double coverage = (double)chainKmers.at(pair.first) / (double)pair.second;
+		if (coverage < averageCoverage * 0.6) continue;
+		if (coverage > averageCoverage * 1.4) continue;
+		result.insert(pair.first);
 	}
 	return result;
 }
@@ -234,7 +252,7 @@ std::vector<Path> loadAlignmentsAsPaths(std::string filename)
 	return result;
 }
 
-std::vector<std::vector<Subpath>> splitPathsPerComponent(const std::vector<Path>& paths, const std::vector<ResolvableComponent>& components)
+std::vector<std::vector<Subpath>> splitPathsPerComponent(const std::vector<Path>& paths, const std::vector<ResolvableComponent>& components, const std::unordered_set<int>& safeChains, const std::unordered_map<int, int>& belongsToChain)
 {
 	std::vector<std::vector<Subpath>> result;
 	result.resize(components.size());
@@ -259,18 +277,29 @@ std::vector<std::vector<Subpath>> splitPathsPerComponent(const std::vector<Path>
 		for (size_t i = 1; i < paths[path].path.size(); i++)
 		{
 			currentEdge = std::make_pair(paths[path].path[i-1], paths[path].path[i]);
-			if (edgeBelongsToComponent.count(currentEdge) == 0 || edgeBelongsToComponent.at(currentEdge) != previousBelongedToComponent)
+			bool split = false;
+			if (edgeBelongsToComponent.count(currentEdge) == 0 || edgeBelongsToComponent.at(currentEdge) != previousBelongedToComponent) split = true;
+			if (safeChains.count(belongsToChain.at(paths[path].path[i].id)) == 1)
+			{
+				currentPath.path.push_back(paths[path].path[i]);
+				split = true;
+			}
+			if (split)
 			{
 				if (previousBelongedToComponent < components.size())
 				{
 					assert(currentPath.path.size() >= 2);
+					for (size_t j = 1; j < currentPath.path.size()-1; j++)
+					{
+						assert(safeChains.count(belongsToChain.at(currentPath.path[j].id)) == 0);
+					}
 					result[previousBelongedToComponent].push_back(currentPath);
 				}
 				currentPath.index = path;
 				currentPath.start = i;
 				currentPath.path.clear();
 				previousBelongedToComponent = components.size();
-				if (edgeBelongsToComponent.count(currentEdge) == 1)
+				if (edgeBelongsToComponent.count(currentEdge) == 1 && safeChains.count(belongsToChain.at(paths[path].path[i].id)) == 0)
 				{
 					currentPath.path.push_back(paths[path].path[i-1]);
 					previousBelongedToComponent = edgeBelongsToComponent.at(currentEdge);
@@ -281,6 +310,10 @@ std::vector<std::vector<Subpath>> splitPathsPerComponent(const std::vector<Path>
 		if (previousBelongedToComponent < components.size())
 		{
 			assert(currentPath.path.size() >= 2);
+			for (size_t j = 1; j < currentPath.path.size()-1; j++)
+			{
+				assert(safeChains.count(belongsToChain.at(currentPath.path[j].id)) == 0);
+			}
 			result[previousBelongedToComponent].push_back(currentPath);
 		}
 	}
@@ -502,6 +535,10 @@ void resolve(int& nextNodeId, const std::unordered_map<int, size_t>& nodeSizes, 
 	{
 		if (safeChains.count(belongsToChain.at(pathsPerComponent[i].path[0].id)) == 0) continue;
 		if (safeChains.count(belongsToChain.at(pathsPerComponent[i].path.back().id)) == 0) continue;
+		for (size_t j = 1; j < pathsPerComponent[i].path.size()-1; j++)
+		{
+			assert(safeChains.count(belongsToChain.at(pathsPerComponent[i].path[j].id)) == 0);
+		}
 		subpathsPerConnection[canon(pathsPerComponent[i].path[0], pathsPerComponent[i].path.back())].push_back(i);
 	}
 	for (auto pair : subpathsPerConnection)
@@ -821,7 +858,7 @@ void updateGraph(GfaGraph& graph, const ResolvableComponent& component, const st
 
 void resolveComponentsAndReplacePaths(GfaGraph& graph, const std::unordered_set<int>& safeChains, const std::unordered_map<int, int>& belongsToChain, std::vector<ResolvableComponent>& components, std::vector<Path>& paths)
 {
-	auto pathsPerComponent = splitPathsPerComponent(paths, components);
+	auto pathsPerComponent = splitPathsPerComponent(paths, components, safeChains, belongsToChain);
 	std::unordered_map<int, size_t> nodeSizes;
 	int nextNodeId = 0;
 	for (auto node : graph.nodes)
@@ -879,12 +916,13 @@ int main(int argc, char** argv)
 	std::string graphFile { argv[1] };
 	std::string alignmentFile { argv[2] };
 	size_t safeChainSize = std::stol(argv[3]);
-	std::string outputGraphFile { argv[4] };
-	std::string translatedAlignmentFile { argv[5] };
+	size_t genomeSize = std::stol(argv[4]);
+	std::string outputGraphFile { argv[5] };
+	std::string translatedAlignmentFile { argv[6] };
 
 	auto graph = GfaGraph::LoadFromFile(graphFile, true);
 	graph.confirmDoublesidedEdges();
-	auto safeChains = getSafeChains(graph, safeChainSize);
+	auto safeChains = getSafeChains(graph, safeChainSize, genomeSize);
 	std::cerr << safeChains.size() << " safe chains" << std::endl;
 	auto belongsToChain = getChainBelongers(graph);
 	auto components = getComponents(graph, safeChains, belongsToChain);

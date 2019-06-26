@@ -171,7 +171,7 @@ rule resolve_small_tangles:
 		graph = TMPDIR + "assembly-untip-unitig-withchains.gfa",
 		alns = TMPDIR + "translated-1.gam"
 	output: temp(TMPDIR + "assembly-untip-unitig-repeat.gfa")
-	shell: "{ALIGNERBINDIR}ResolveSmallTangles {input.graph} {input.alns} 5000 {output} /dev/null"
+	shell: "{ALIGNERBINDIR}ResolveSmallTangles {input.graph} {input.alns} 1000 {GENOMESIZE} {output} /dev/null"
 
 rule final:
 	input:

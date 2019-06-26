@@ -13,52 +13,52 @@ Path Path::Reverse() const
 	return result;
 }
 
-bool AlignmentQualityCompareLT(const Alignment& left, const Alignment& right)
+bool AlignmentMatchCompareLT(const Alignment& left, const Alignment& right)
 {
 	return left.alignmentLength * left.alignmentIdentity < right.alignmentLength * right.alignmentIdentity;
 }
 
-bool AlignmentQualityCompareGT(const Alignment& left, const Alignment& right)
-{
-	return left.alignmentLength * left.alignmentIdentity > right.alignmentLength * right.alignmentIdentity;
-}
-
-AlignmentComparerLT::AlignmentComparerLT(const std::vector<Alignment>& paths) :
+AlignmentMatchComparerLT::AlignmentMatchComparerLT(const std::vector<Alignment>& paths) :
 paths(&paths)
 {}
 
-AlignmentComparerLT::AlignmentComparerLT() :
+AlignmentMatchComparerLT::AlignmentMatchComparerLT() :
 paths(nullptr)
 {}
 
-bool AlignmentComparerLT::operator()(const Alignment& left, const Alignment& right) const
+bool AlignmentMatchComparerLT::operator()(const Alignment& left, const Alignment& right) const
+{
+	return AlignmentMatchCompareLT(left, right);
+}
+
+bool AlignmentMatchComparerLT::operator()(size_t left, size_t right) const
+{
+	assert(paths != nullptr);
+	return AlignmentMatchCompareLT(paths->at(left), paths->at(right));
+}
+
+bool AlignmentQualityCompareLT(const Alignment& left, const Alignment& right)
+{
+	return left.alignmentIdentity < right.alignmentIdentity;
+}
+
+AlignmentQualityComparerLT::AlignmentQualityComparerLT(const std::vector<Alignment>& paths) :
+paths(&paths)
+{}
+
+AlignmentQualityComparerLT::AlignmentQualityComparerLT() :
+paths(nullptr)
+{}
+
+bool AlignmentQualityComparerLT::operator()(const Alignment& left, const Alignment& right) const
 {
 	return AlignmentQualityCompareLT(left, right);
 }
 
-bool AlignmentComparerLT::operator()(size_t left, size_t right) const
+bool AlignmentQualityComparerLT::operator()(size_t left, size_t right) const
 {
 	assert(paths != nullptr);
 	return AlignmentQualityCompareLT(paths->at(left), paths->at(right));
-}
-
-AlignmentComparerGT::AlignmentComparerGT(const std::vector<Alignment>& paths) :
-paths(&paths)
-{}
-
-AlignmentComparerGT::AlignmentComparerGT() :
-paths(nullptr)
-{}
-
-bool AlignmentComparerGT::operator()(const Alignment& left, const Alignment& right) const
-{
-	return AlignmentQualityCompareLT(left, right);
-}
-
-bool AlignmentComparerGT::operator()(size_t left, size_t right) const
-{
-	assert(paths != nullptr);
-	return AlignmentQualityCompareGT(paths->at(left), paths->at(right));
 }
 
 bool operator<(const std::pair<size_t, NodePos>& left, const std::pair<size_t, NodePos>& right)

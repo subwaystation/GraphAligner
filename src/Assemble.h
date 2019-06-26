@@ -79,26 +79,25 @@ void StreamAlignments(std::string filename, F f)
 	}
 }
 
-bool AlignmentQualityCompareLT(const Alignment& left, const Alignment& right);
+bool AlignmentMatchCompareLT(const Alignment& left, const Alignment& right);
+bool AlignmentIdentityCompareLT(const Alignment& left, const Alignment& right);
 
-struct AlignmentComparerLT
+struct AlignmentMatchComparerLT
 {
 public:
-	AlignmentComparerLT(const std::vector<Alignment>& paths);
-	AlignmentComparerLT();
+	AlignmentMatchComparerLT(const std::vector<Alignment>& paths);
+	AlignmentMatchComparerLT();
 	bool operator()(const Alignment& left, const Alignment& right) const;
 	bool operator()(size_t left, size_t right) const;
 private:
 	const std::vector<Alignment>* const paths;
 };
 
-bool AlignmentQualityCompareGT(const Alignment& left, const Alignment& right);
-
-struct AlignmentComparerGT
+struct AlignmentQualityComparerLT
 {
 public:
-	AlignmentComparerGT(const std::vector<Alignment>& paths);
-	AlignmentComparerGT();
+	AlignmentQualityComparerLT(const std::vector<Alignment>& paths);
+	AlignmentQualityComparerLT();
 	bool operator()(const Alignment& left, const Alignment& right) const;
 	bool operator()(size_t left, size_t right) const;
 private:

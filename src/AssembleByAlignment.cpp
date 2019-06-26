@@ -351,9 +351,24 @@ std::set<std::pair<size_t, size_t>> pickLongestPerRead(const std::vector<Path>& 
 	}
 	for (size_t i = 0; i < leftAlnsPerRead.size(); i++)
 	{
-		std::sort(leftAlnsPerRead[i].begin(), leftAlnsPerRead[i].end(), AlignmentComparerLT { alns });
-		std::sort(rightAlnsPerRead[i].begin(), rightAlnsPerRead[i].end(), AlignmentComparerLT { alns });
+		std::sort(leftAlnsPerRead[i].begin(), leftAlnsPerRead[i].end(), AlignmentMatchComparerLT { alns });
+		std::sort(rightAlnsPerRead[i].begin(), rightAlnsPerRead[i].end(), AlignmentMatchComparerLT { alns });
 		std::set<size_t> pickedHere;
+		for (size_t j = leftAlnsPerRead[i].size() > maxNum ? (leftAlnsPerRead[i].size() - maxNum) : 0; j < leftAlnsPerRead[i].size(); j++)
+		{
+			pickedHere.insert(leftAlnsPerRead[i][j]);
+		}
+		for (size_t j = rightAlnsPerRead[i].size() > maxNum ? (rightAlnsPerRead[i].size() - maxNum) : 0; j < rightAlnsPerRead[i].size(); j++)
+		{
+			pickedHere.insert(rightAlnsPerRead[i][j]);
+		}
+		for (auto index : pickedHere)
+		{
+			picked[index] += 1;
+		}
+		std::sort(leftAlnsPerRead[i].begin(), leftAlnsPerRead[i].end(), AlignmentQualityComparerLT { alns });
+		std::sort(rightAlnsPerRead[i].begin(), rightAlnsPerRead[i].end(), AlignmentQualityComparerLT { alns });
+		pickedHere.clear();
 		for (size_t j = leftAlnsPerRead[i].size() > maxNum ? (leftAlnsPerRead[i].size() - maxNum) : 0; j < leftAlnsPerRead[i].size(); j++)
 		{
 			pickedHere.insert(leftAlnsPerRead[i][j]);
@@ -371,8 +386,8 @@ std::set<std::pair<size_t, size_t>> pickLongestPerRead(const std::vector<Path>& 
 	for (size_t i = 0; i < alns.size(); i++)
 	{
 		assert(picked[i] >= 0);
-		assert(picked[i] <= 2);
-		if (picked[i] == 2) result.emplace(alns[i].leftPath, alns[i].rightPath);
+		assert(picked[i] <= 4);
+		if (picked[i] == 4) result.emplace(alns[i].leftPath, alns[i].rightPath);
 	}
 	std::cerr << result.size() << " alignments after picking longest" << std::endl;
 	return result;
