@@ -390,6 +390,73 @@ std::set<std::pair<size_t, size_t>> pickLongestPerRead(const std::vector<Path>& 
 		if (picked[i] == 4) result.emplace(alns[i].leftPath, alns[i].rightPath);
 	}
 	std::cerr << result.size() << " alignments after picking longest" << std::endl;
+	std::vector<size_t> checkStack;
+	for (size_t i = 0; i < leftAlnsPerRead.size(); i++)
+	{
+		size_t countLeft = 0;
+		size_t countRight = 0;
+		for (auto j : leftAlnsPerRead[i])
+		{
+			std::pair<size_t, size_t> key { alns[j].leftPath, alns[j].rightPath };
+			if (result.count(key) == 1) countLeft += 1;
+		}
+		for (auto j : rightAlnsPerRead[i])
+		{
+			std::pair<size_t, size_t> key { alns[j].leftPath, alns[j].rightPath };
+			if (result.count(key) == 1) countRight += 1;
+		}
+		if (countLeft != countRight) checkStack.push_back(i);
+	}
+	while (checkStack.size() > 0)
+	{
+		auto i = checkStack.back();
+		checkStack.pop_back();
+		size_t countLeft = 0;
+		size_t countRight = 0;
+		size_t lastLeft = 0;
+		size_t lastRight = 0;
+		for (size_t j = 0; j < leftAlnsPerRead[i].size(); j++)
+		{
+			std::pair<size_t, size_t> key { alns[leftAlnsPerRead[i][j]].leftPath, alns[leftAlnsPerRead[i][j]].rightPath };
+			if (result.count(key) == 1)
+			{
+				lastLeft = j;
+				countLeft += 1;
+			}
+		}
+		for (size_t j = 0; j < rightAlnsPerRead[i].size(); j++)
+		{
+			std::pair<size_t, size_t> key { alns[rightAlnsPerRead[i][j]].leftPath, alns[rightAlnsPerRead[i][j]].rightPath };
+			if (result.count(key) == 1)
+			{
+				lastRight = j;
+				countRight += 1;
+			}
+		}
+		for (size_t j = lastRight; j > 0 && countRight > countLeft * 1.2; j--)
+		{
+			std::pair<size_t, size_t> key { alns[rightAlnsPerRead[i][j]].leftPath, alns[rightAlnsPerRead[i][j]].rightPath };
+			if (result.count(key) == 1)
+			{
+				countRight--;
+				result.erase(key);
+				checkStack.push_back(key.first);
+				checkStack.push_back(key.second);
+			}
+		}
+		for (size_t j = lastLeft; j > 0 && countLeft > countRight * 1.2; j--)
+		{
+			std::pair<size_t, size_t> key { alns[leftAlnsPerRead[i][j]].leftPath, alns[leftAlnsPerRead[i][j]].rightPath };
+			if (result.count(key) == 1)
+			{
+				countLeft--;
+				result.erase(key);
+				checkStack.push_back(key.first);
+				checkStack.push_back(key.second);
+			}
+		}
+	}
+	std::cerr << result.size() << " alignments after converging sides" << std::endl;
 	return result;
 }
 
