@@ -324,6 +324,205 @@ std::vector<Alignment> pickLowestErrorPerRead(const std::vector<Path>& paths, co
 	return result;
 }
 
+void assignToGroupRec(size_t group, size_t i, size_t j, std::vector<std::vector<size_t>>& belongsToGroup, const std::vector<std::vector<std::vector<std::pair<size_t, size_t>>>>& edges, std::vector<std::vector<std::pair<size_t, size_t>>>& groups)
+{
+	assert(i < belongsToGroup.size());
+	assert(i < edges.size());
+	assert(j < belongsToGroup[i].size());
+	assert(j < edges[i].size());
+	if (group == belongsToGroup[i][j]) return;
+	assert(belongsToGroup[i][j] == std::numeric_limits<size_t>::max());
+	belongsToGroup[i][j] = group;
+	groups[group].emplace_back(i, j);
+	for (auto edge : edges[i][j])
+	{
+		assignToGroupRec(group, edge.first, edge.second, belongsToGroup, edges, groups);
+	}
+}
+
+void addAffectedNodesRec(size_t i, const std::vector<std::vector<std::pair<size_t, size_t>>>& edges, const std::unordered_set<size_t>& forbidden, std::unordered_set<size_t>& affectedNodes, std::unordered_set<size_t>& affectedOverlaps)
+{
+	if (affectedNodes.count(i) == 1) return;
+	affectedNodes.insert(i);
+	for (auto edge : edges[i])
+	{
+		if (forbidden.count(edge.second) == 1) continue;
+		affectedOverlaps.insert(edge.second);
+		addAffectedNodesRec(edge.first, edges, forbidden, affectedNodes, affectedOverlaps);
+	}
+}
+
+void modBetweenness(size_t startNode, const std::vector<std::vector<std::pair<size_t, size_t>>>& edges, const std::unordered_set<size_t>& forbidden, std::vector<double>& totalBetweenness, double multiplier)
+{
+	std::vector<size_t> queue;
+	queue.push_back(startNode);
+	std::unordered_map<size_t, size_t> explored;
+	explored[startNode] = 0;
+	size_t queueIndex = 0;
+	std::vector<std::vector<size_t>> takenEdge;
+	std::vector<std::vector<size_t>> parents;
+	std::vector<double> numPaths;
+	std::vector<size_t> depth;
+	std::vector<size_t> backwardsJuice;
+	numPaths.push_back(0);
+	takenEdge.emplace_back();
+	parents.emplace_back();
+	depth.push_back(0);
+	backwardsJuice.push_back(0);
+	while (queueIndex < queue.size())
+	{
+		size_t node = queue[queueIndex];
+		size_t currentDepth = depth[queueIndex];
+		queueIndex++;
+		bool hasChild = false;
+		for (auto edge : edges[node])
+		{
+			if (forbidden.count(edge.second) == 1) continue;
+			if (explored.count(edge.first) == 0)
+			{
+				explored[edge.first] = queue.size();
+				queue.push_back(edge.first);
+				takenEdge.emplace_back();
+				parents.emplace_back();
+				takenEdge.back().push_back(edge.second);
+				parents.back().push_back(queueIndex);
+				depth.push_back(currentDepth+1);
+				numPaths.push_back(0);
+			}
+			else
+			{
+				size_t existing = explored.at(edge.first);
+				size_t existingDepth = depth[existing];
+				assert(existingDepth <= currentDepth+1);
+				if (existingDepth <= currentDepth) continue;
+				parents[existing].push_back(queueIndex);
+				takenEdge[existing].push_back(edge.second);
+			}
+			numPaths.back() += numPaths[queueIndex];
+			hasChild = true;
+		}
+	}
+	backwardsJuice.resize(numPaths.size(), 1);
+	for (size_t i = queue.size()-1; i > 0; i--)
+	{
+		for (size_t j = 0; j < parents[i].size(); j++)
+		{
+			assert(parents[i][j] < backwardsJuice.size());
+			assert(takenEdge[i][j] < totalBetweenness.size());
+			backwardsJuice[parents[i][j]] += backwardsJuice[i] * numPaths[i] / numPaths[parents[i][j]];
+			totalBetweenness[takenEdge[i][j]] += backwardsJuice[i] * numPaths[i] / numPaths[parents[i][j]] * multiplier;
+		}
+	}
+}
+
+void addBetweenness(size_t startNode, const std::vector<std::vector<std::pair<size_t, size_t>>>& edges, const std::unordered_set<size_t>& forbidden, std::vector<double>& totalBetweenness)
+{
+	modBetweenness(startNode, edges, forbidden, totalBetweenness, 1);
+}
+
+void reduceBetweenness(size_t startNode, const std::vector<std::vector<std::pair<size_t, size_t>>>& edges, const std::unordered_set<size_t>& forbidden, std::vector<double>& totalBetweenness)
+{
+	modBetweenness(startNode, edges, forbidden, totalBetweenness, -1);
+}
+
+template <typename T>
+void forbidOverlap(size_t forbidThis, const std::vector<std::vector<std::pair<size_t, size_t>>>& edges, std::unordered_set<size_t>& forbidden, std::vector<double>& totalBetweenness, T& mostBetweenOverlap, const std::vector<Alignment>& alns, const std::vector<std::vector<size_t>>& nodeNum)
+{
+	std::unordered_set<size_t> affectedNodes;
+	std::unordered_set<size_t> affectedOverlaps;
+	for (size_t i = 0; i < alns[forbidThis].alignedPairs.size(); i++)
+	{
+		addAffectedNodesRec(nodeNum[forbidThis][alns[forbidThis].alignedPairs[i].leftIndex], edges, forbidden, affectedNodes, affectedOverlaps);
+	}
+	for (auto i : affectedNodes)
+	{
+		reduceBetweenness(i, edges, forbidden, totalBetweenness);
+	}
+	forbidden.emplace(forbidThis);
+	for (auto i : affectedNodes)
+	{
+		addBetweenness(i, edges, forbidden, totalBetweenness);
+	}
+	for (auto i : affectedOverlaps)
+	{
+		mostBetweenOverlap.emplace(i, totalBetweenness[i] / alns[i].alignedPairs.size());
+	}
+}
+
+std::set<std::pair<size_t, size_t>> pickCutAlignments(const std::vector<Path>& paths, std::string alnFile, int wantedGroupSize)
+{
+	double maxCentrality = wantedGroupSize * wantedGroupSize / 4;
+	std::vector<std::vector<std::pair<size_t, size_t>>> edges;
+	std::unordered_set<size_t> forbidden;
+	std::vector<double> totalBetweenness;
+	std::vector<Alignment> alns;
+	StreamAlignments(alnFile, [&alns](const Alignment& aln){
+		alns.emplace_back(aln);
+	});
+	std::cerr << alns.size() << " overlaps" << std::endl;
+	totalBetweenness.resize(alns.size());
+	size_t nodeCount = 0;
+	std::vector<std::vector<size_t>> nodeNum;
+	nodeNum.resize(paths.size());
+	for (size_t i = 0; i < paths.size(); i++)
+	{
+		nodeNum[i].resize(paths[i].position.size());
+		for (size_t j = 0; j < paths[i].position.size(); j++)
+		{
+			nodeNum[i][j] = nodeCount;
+			nodeCount++;
+		}
+	}
+	std::cerr << nodeCount << " nodes" << std::endl;
+	edges.resize(nodeCount);
+	for (size_t i = 0; i < alns.size(); i++)
+	{
+		for (auto pair : alns[i].alignedPairs)
+		{
+			edges[nodeNum[alns[i].leftPath][pair.leftIndex]].emplace_back(nodeNum[alns[i].rightPath][pair.rightIndex], i);
+			edges[nodeNum[alns[i].rightPath][pair.rightIndex]].emplace_back(nodeNum[alns[i].leftPath][pair.leftIndex], i);
+		}
+	}
+	std::cerr << "get initial betweenness" << std::endl;
+	for (size_t i = 0; i < edges.size(); i++)
+	{
+		addBetweenness(i, edges, forbidden, totalBetweenness);
+		if (i % 10000 == 0) std::cerr << i << "/" << edges.size() << " ";
+	}
+	std::cerr << std::endl;
+	std::priority_queue<std::pair<size_t, double>, std::vector<std::pair<size_t, double>>, std::function<bool(const std::pair<size_t, double>&, const std::pair<size_t, double>&)>> mostBetweenOverlap { [](const std::pair<size_t, double>& left, const std::pair<size_t, double>& right) { return left.second < right.second; } };
+	for (size_t i = 0; i < totalBetweenness.size(); i++)
+	{
+		mostBetweenOverlap.emplace(i, totalBetweenness[i] / alns[i].alignedPairs.size());
+	}
+	std::cerr << "forbid overlaps" << std::endl;
+	while (mostBetweenOverlap.size() > 0)
+	{
+		auto pair = mostBetweenOverlap.top();
+		size_t overlapIndex = pair.first;
+		double storedBetweenness = pair.second;
+		mostBetweenOverlap.pop();
+		if (storedBetweenness <= maxCentrality) continue;
+		double currentBetweenness = totalBetweenness[overlapIndex] / alns[overlapIndex].alignedPairs.size();
+		if (storedBetweenness > currentBetweenness + 1 || storedBetweenness < currentBetweenness - 1) continue;
+		assert(storedBetweenness > maxCentrality);
+		forbidOverlap(overlapIndex, edges, forbidden, totalBetweenness, mostBetweenOverlap, alns, nodeNum);
+		if (forbidden.size() % 10000 == 0) std::cerr << forbidden.size() << "... ";
+	}
+	std::cerr << std::endl;
+	std::cerr << "get allowed" << std::endl;
+	std::set<std::pair<size_t, size_t>> result;
+	for (size_t i = 0; i < alns.size(); i++)
+	{
+		if (forbidden.count(i) == 1) continue;
+		std::pair<size_t, size_t> key { alns[i].leftPath, alns[i].rightPath };
+		result.insert(key);
+	}
+	std::cerr << result.size() << " forbidden overlaps" << std::endl;
+	std::cerr << (alns.size() - result.size()) << " allowed overlaps" << std::endl;
+	return result;
+}
+
 std::set<std::pair<size_t, size_t>> pickLongestPerRead(const std::vector<Path>& paths, std::string alnFile, size_t maxNum)
 {
 	std::vector<Alignment> alns;
@@ -829,7 +1028,7 @@ int main(int argc, char** argv)
 	std::string inputOverlaps { argv[3] };
 	std::string outputGraph { argv[4] };
 	std::string outputPaths { argv[5] };
-	int maxAlnCount = std::stoi(argv[6]);
+	int wantedGroupSize = std::stoi(argv[6]);
 
 	std::cerr << "load graph" << std::endl;
 	auto graph = GfaGraph::LoadFromFile(inputGraph);
@@ -841,8 +1040,10 @@ int main(int argc, char** argv)
 		paths = loadAlignmentsAsPaths(inputAlns, 1000, nodeSizes);
 		std::cerr << paths.size() << " paths after filtering by length" << std::endl;
 	}
-	std::cerr << "pick longest alignments" << std::endl;
-	auto pickedAlns = pickLongestPerRead(paths, inputOverlaps, maxAlnCount);
+	// std::cerr << "pick longest alignments" << std::endl;
+	// auto pickedAlns = pickLongestPerRead(paths, inputOverlaps, maxAlnPickCount);
+	std::cerr << "pick-cut alignments" << std::endl;
+	auto pickedAlns = pickCutAlignments(paths, inputOverlaps, wantedGroupSize);
 	std::cerr << "get transitive closure" << std::endl;
 	auto transitiveClosures = getTransitiveClosures(paths, pickedAlns, inputOverlaps);
 	std::cerr << "deallocate picked" << std::endl;
