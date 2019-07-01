@@ -410,6 +410,7 @@ void modBetweenness(size_t startNode, const std::vector<std::vector<std::pair<si
 			assert(parents[i][j] < backwardsJuice.size());
 			assert(takenEdge[i][j] < totalBetweenness.size());
 			backwardsJuice[parents[i][j]] += backwardsJuice[i] * numPaths[i] / numPaths[parents[i][j]];
+			assert(multiplier == 1 || totalBetweenness[takenEdge[i][j]] >= backwardsJuice[i] * numPaths[i] / numPaths[parents[i][j]] * multiplier);
 			totalBetweenness[takenEdge[i][j]] += backwardsJuice[i] * numPaths[i] / numPaths[parents[i][j]] * multiplier;
 		}
 	}
@@ -434,6 +435,9 @@ void forbidOverlap(size_t forbidThis, const std::vector<std::vector<std::pair<si
 	{
 		addAffectedNodesRec(nodeNum[forbidThis][alns[forbidThis].alignedPairs[i].leftIndex], edges, forbidden, affectedNodes, affectedOverlaps);
 	}
+	assert(affectedNodes.size() >= 2);
+	assert(affectedNodes.size() >= alns[forbidThis].alignedPairs.size());
+	assert(affectedOverlaps.size() >= 1);
 	for (auto i : affectedNodes)
 	{
 		reduceBetweenness(i, edges, forbidden, totalBetweenness);
@@ -502,6 +506,7 @@ std::set<std::pair<size_t, size_t>> pickCutAlignments(const std::vector<Path>& p
 		size_t overlapIndex = pair.first;
 		double storedBetweenness = pair.second;
 		mostBetweenOverlap.pop();
+		if (forbidden.count(overlapIndex) == 1) continue;
 		if (storedBetweenness <= maxCentrality) continue;
 		double currentBetweenness = totalBetweenness[overlapIndex] / alns[overlapIndex].alignedPairs.size();
 		if (storedBetweenness > currentBetweenness + 1 || storedBetweenness < currentBetweenness - 1) continue;
