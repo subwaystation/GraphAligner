@@ -351,130 +351,96 @@ void addAffectedNodesRec(size_t i, const std::vector<std::vector<std::pair<size_
 	}
 }
 
-void checkComponentcount(size_t start, const std::vector<std::vector<std::pair<size_t, size_t>>>& edges, const std::vector<bool>& forbidden, std::vector<size_t>& componentCount, const std::vector<size_t>& nodeBelongsToRead, std::vector<bool>& checked)
+size_t find(size_t n, std::vector<size_t>& parent)
 {
-	if (checked[start]) return;
-	std::unordered_set<size_t> nodes;
-	std::unordered_set<size_t> reads;
-	std::vector<size_t> stack;
-	stack.push_back(start);
-	while (stack.size() > 0)
-	{
-		size_t i = stack.back();
-		stack.pop_back();
-		if (nodes.count(i) == 1) continue;
-		checked[i] = true;
-		nodes.insert(i);
-		reads.insert(nodeBelongsToRead[i]);
-		for (auto edge : edges[i])
-		{
-			if (forbidden[edge.second]) continue;
-			stack.push_back(edge.first);
-		}
-	}
-	for (auto node : nodes)
-	{
-		componentCount[node] = reads.size();
-	}
+	if (parent[n] == n) return n;
+	auto result = parent[n];
+	parent[n] = result;
+	return result;
 }
 
-void checkComponentcount(size_t start, const std::vector<std::vector<std::pair<size_t, size_t>>>& edges, const std::vector<bool>& forbidden, std::vector<size_t>& componentCount, const std::vector<size_t>& nodeBelongsToRead)
+void merge(size_t left, size_t right, std::vector<size_t>& parent, std::vector<size_t>& componentSize)
 {
-	std::unordered_set<size_t> nodes;
-	std::unordered_set<size_t> reads;
-	std::vector<size_t> stack;
-	stack.push_back(start);
-	while (stack.size() > 0)
+	auto leftp = find(left, parent);
+	auto rightp = find(right, parent);
+	if (componentSize[leftp] > componentSize[rightp])
 	{
-		size_t i = stack.back();
-		stack.pop_back();
-		if (nodes.count(i) == 1) continue;
-		nodes.insert(i);
-		reads.insert(nodeBelongsToRead[i]);
-		for (auto edge : edges[i])
-		{
-			if (forbidden[edge.second]) continue;
-			stack.push_back(edge.first);
-		}
+		std::swap(left, right);
+		std::swap(leftp, rightp);
 	}
-	for (auto node : nodes)
-	{
-		componentCount[node] = reads.size();
-	}
+	parent[leftp] = rightp;
+	componentSize[rightp] += componentSize[leftp];
 }
 
-bool maybeForbid(size_t forbidThis, std::vector<size_t>& componentCount, const std::vector<std::vector<std::pair<size_t, size_t>>>& edges, std::vector<bool>& forbidden, const std::vector<Alignment>& alns, const std::vector<std::vector<size_t>>& nodeNum, const std::vector<size_t>& nodeBelongsToRead, int coverageDifferenceCutoff)
+bool maybeAllow(size_t allowThis, std::vector<size_t>& parent, std::vector<size_t>& componentSize, std::vector<bool>& allowed, const std::vector<Alignment>& alns, const std::vector<std::vector<size_t>>& nodeNum, int coverageDifferenceCutoff)
 {
-	std::unordered_set<size_t> affectedNodes;
 	bool hasCoverageDifference = false;
-	for (size_t i = 0; i < alns[forbidThis].alignedPairs.size(); i++)
+	for (size_t i = 0; i < alns[allowThis].alignedPairs.size(); i++)
 	{
-		size_t thisNode = nodeNum[alns[forbidThis].leftPath][alns[forbidThis].alignedPairs[i].leftIndex];
-		size_t thisOtherNode = nodeNum[alns[forbidThis].rightPath][alns[forbidThis].alignedPairs[i].rightIndex];
-		int countHere = componentCount[thisNode];
-		if (alns[forbidThis].alignedPairs[i].leftIndex > 0)
+		size_t thisNode = nodeNum[alns[allowThis].leftPath][alns[allowThis].alignedPairs[i].leftIndex];
+		size_t thisOtherNode = nodeNum[alns[allowThis].rightPath][alns[allowThis].alignedPairs[i].rightIndex];
+		if (find(thisNode, parent) == find(thisOtherNode, parent)) continue;
+		int countHere = componentSize[find(thisNode, parent)] + componentSize[find(thisOtherNode, parent)];
+		if (alns[allowThis].alignedPairs[i].leftIndex > 0)
 		{
-			if (i == 0 || alns[forbidThis].alignedPairs[i-1].leftIndex != alns[forbidThis].alignedPairs[i].leftIndex-1)
+			if (i == 0 || alns[allowThis].alignedPairs[i-1].leftIndex != alns[allowThis].alignedPairs[i].leftIndex-1)
 			{
-				size_t compareNode = nodeNum[alns[forbidThis].leftPath][alns[forbidThis].alignedPairs[i].leftIndex-1];
-				int otherCount = componentCount[compareNode];
+				size_t compareNode = nodeNum[alns[allowThis].leftPath][alns[allowThis].alignedPairs[i].leftIndex-1];
+				int otherCount = componentSize[find(compareNode, parent)];
 				if (countHere >= coverageDifferenceCutoff && otherCount >= coverageDifferenceCutoff && countHere - otherCount > coverageDifferenceCutoff) hasCoverageDifference = true;
 			}
 		}
-		if (alns[forbidThis].alignedPairs[i].rightIndex > 0)
+		if (alns[allowThis].alignedPairs[i].rightIndex > 0)
 		{
-			if (i == 0 || alns[forbidThis].alignedPairs[i-1].rightIndex != alns[forbidThis].alignedPairs[i].rightIndex-1)
+			if (i == 0 || alns[allowThis].alignedPairs[i-1].rightIndex != alns[allowThis].alignedPairs[i].rightIndex-1)
 			{
-				size_t compareNode = nodeNum[alns[forbidThis].rightPath][alns[forbidThis].alignedPairs[i].rightIndex-1];
-				int otherCount = componentCount[compareNode];
+				size_t compareNode = nodeNum[alns[allowThis].rightPath][alns[allowThis].alignedPairs[i].rightIndex-1];
+				int otherCount = componentSize[find(compareNode, parent)];
 				if (countHere >= coverageDifferenceCutoff && otherCount >= coverageDifferenceCutoff && countHere - otherCount > coverageDifferenceCutoff) hasCoverageDifference = true;
 			}
 		}
-		if (alns[forbidThis].alignedPairs[i].leftIndex < nodeNum[alns[forbidThis].leftPath].size() - 1)
+		if (alns[allowThis].alignedPairs[i].leftIndex < nodeNum[alns[allowThis].leftPath].size() - 1)
 		{
-			if (i == alns[forbidThis].alignedPairs.size()-1 || alns[forbidThis].alignedPairs[i+1].leftIndex != alns[forbidThis].alignedPairs[i].leftIndex+1)
+			if (i == alns[allowThis].alignedPairs.size()-1 || alns[allowThis].alignedPairs[i+1].leftIndex != alns[allowThis].alignedPairs[i].leftIndex+1)
 			{
-				size_t compareNode = nodeNum[alns[forbidThis].leftPath][alns[forbidThis].alignedPairs[i].leftIndex+1];
-				int otherCount = componentCount[compareNode];
+				size_t compareNode = nodeNum[alns[allowThis].leftPath][alns[allowThis].alignedPairs[i].leftIndex+1];
+				int otherCount = componentSize[find(compareNode, parent)];
 				if (countHere >= coverageDifferenceCutoff && otherCount >= coverageDifferenceCutoff && countHere - otherCount > coverageDifferenceCutoff) hasCoverageDifference = true;
 			}
 		}
-		if (alns[forbidThis].alignedPairs[i].rightIndex < nodeNum[alns[forbidThis].rightPath].size() - 1)
+		if (alns[allowThis].alignedPairs[i].rightIndex < nodeNum[alns[allowThis].rightPath].size() - 1)
 		{
-			if (i == alns[forbidThis].alignedPairs.size()-1 || alns[forbidThis].alignedPairs[i+1].rightIndex != alns[forbidThis].alignedPairs[i].rightIndex+1)
+			if (i == alns[allowThis].alignedPairs.size()-1 || alns[allowThis].alignedPairs[i+1].rightIndex != alns[allowThis].alignedPairs[i].rightIndex+1)
 			{
-				size_t compareNode = nodeNum[alns[forbidThis].rightPath][alns[forbidThis].alignedPairs[i].rightIndex+1];
-				int otherCount = componentCount[compareNode];
+				size_t compareNode = nodeNum[alns[allowThis].rightPath][alns[allowThis].alignedPairs[i].rightIndex+1];
+				int otherCount = componentSize[find(compareNode, parent)];
 				if (countHere >= coverageDifferenceCutoff && otherCount >= coverageDifferenceCutoff && countHere - otherCount > coverageDifferenceCutoff) hasCoverageDifference = true;
 			}
 		}
-		affectedNodes.insert(thisNode);
-		affectedNodes.insert(thisOtherNode);
 	}
-	if (!hasCoverageDifference) return false;
-	forbidden[forbidThis] = true;
-	for (auto i : affectedNodes)
+	if (hasCoverageDifference) return false;
+	assert(!allowed[allowThis]);
+	allowed[allowThis] = true;
+	for (auto pair : alns[allowThis].alignedPairs)
 	{
-		checkComponentcount(i, edges, forbidden, componentCount, nodeBelongsToRead);
+		size_t thisNode = nodeNum[alns[allowThis].leftPath][pair.leftIndex];
+		size_t thisOtherNode = nodeNum[alns[allowThis].rightPath][pair.rightIndex];
+		merge(thisNode, thisOtherNode, parent, componentSize);
 	}
 	return true;
 }
 
-std::unordered_set<size_t> zipCutAlignments(const std::vector<Path>& paths, const std::unordered_set<size_t>& initialPick, std::string alnFile, int coverageDifferenceCutoff)
+std::unordered_set<size_t> zipAddAlignments(const std::vector<Path>& paths, const std::unordered_set<size_t>& initialPick, std::string alnFile, int coverageDifferenceCutoff)
 {
-	std::vector<std::vector<std::pair<size_t, size_t>>> edges;
-	std::vector<bool> forbidden;
 	std::vector<Alignment> alns;
-	std::vector<size_t> nodeBelongsToRead;
-	std::vector<size_t> componentCount;
+	std::vector<bool> picked;
 	StreamAlignments(alnFile, [&alns, &initialPick](const Alignment& aln){
-		auto key = aln.alignmentID;
-		if (initialPick.count(key) == 0) return;
+		if (initialPick.count(aln.alignmentID) == 0) return;
 		alns.emplace_back(aln);
 	});
 	std::cerr << alns.size() << " overlaps" << std::endl;
 	size_t nodeCount = 0;
-	forbidden.resize(alns.size(), false);
+	picked.resize(alns.size(), false);
 	std::vector<std::vector<size_t>> nodeNum;
 	nodeNum.resize(paths.size());
 	for (size_t i = 0; i < paths.size(); i++)
@@ -483,29 +449,17 @@ std::unordered_set<size_t> zipCutAlignments(const std::vector<Path>& paths, cons
 		for (size_t j = 0; j < paths[i].position.size(); j++)
 		{
 			nodeNum[i][j] = nodeCount;
-			nodeBelongsToRead.push_back(i);
 			nodeCount++;
 		}
 	}
 	std::cerr << nodeCount << " nodes" << std::endl;
-	componentCount.resize(nodeCount, false);
-	edges.resize(nodeCount);
-	for (size_t i = 0; i < alns.size(); i++)
+	std::vector<size_t> parent;
+	std::vector<size_t> componentSize;
+	componentSize.resize(nodeCount, 1);
+	parent.resize(nodeCount, 0);
+	for (size_t i = 0; i < nodeCount; i++)
 	{
-		for (auto pair : alns[i].alignedPairs)
-		{
-			edges[nodeNum[alns[i].leftPath][pair.leftIndex]].emplace_back(nodeNum[alns[i].rightPath][pair.rightIndex], i);
-			edges[nodeNum[alns[i].rightPath][pair.rightIndex]].emplace_back(nodeNum[alns[i].leftPath][pair.leftIndex], i);
-		}
-	}
-	std::cerr << "initial component counts" << std::endl;
-	{
-		std::vector<bool> checked;
-		checked.resize(nodeCount, false);
-		for (size_t i = 0; i < nodeCount; i++)
-		{
-			checkComponentcount(i, edges, forbidden, componentCount, nodeBelongsToRead, checked);
-		}
+		parent[i] = i;
 	}
 	std::vector<size_t> worstAlignments;
 	worstAlignments.reserve(alns.size());
@@ -514,25 +468,27 @@ std::unordered_set<size_t> zipCutAlignments(const std::vector<Path>& paths, cons
 		worstAlignments.push_back(i);
 	}
 	std::sort(worstAlignments.begin(), worstAlignments.end(), [&alns](size_t left, size_t right) { return alns[left].alignmentLength * alns[left].alignmentIdentity < alns[right].alignmentLength * alns[right].alignmentIdentity; });
-	std::cerr << "forbid from worst to best" << std::endl;
-	size_t forbiddenCount = 0;
-	for (size_t i = 0; i < worstAlignments.size(); i++)
+	std::cerr << "allow from best to worst" << std::endl;
+	size_t allowedCount = 0;
+	for (size_t i = worstAlignments.size()-1; i < worstAlignments.size(); i--)
 	{
 		size_t aln = worstAlignments[i];
-		bool forbade = maybeForbid(aln, componentCount, edges, forbidden, alns, nodeNum, nodeBelongsToRead, coverageDifferenceCutoff);
-		if (forbade) std::cerr << "!"; else std::cerr << ".";
-		if (forbade) forbiddenCount += 1;
+		assert(!picked[aln]);
+		bool allowed = maybeAllow(aln, parent, componentSize, picked, alns, nodeNum, coverageDifferenceCutoff);
+		if (allowed) std::cerr << "!"; else std::cerr << ".";
+		if (allowed) allowedCount += 1;
 	}
-	std::cerr << forbiddenCount << " forbidden overlaps" << std::endl;
-	std::cerr << "get allowed" << std::endl;
+	std::cerr << allowedCount << " allowed overlaps" << std::endl;
 	std::unordered_set<size_t> result;
 	for (size_t i = 0; i < alns.size(); i++)
 	{
-		if (forbidden[i]) continue;
+		if (!picked[i]) continue;
 		size_t key = alns[i].alignmentID;
+		assert(result.count(key) == 0);
 		result.insert(key);
 	}
 	std::cerr << result.size() << " allowed overlaps" << std::endl;
+	assert(result.size() == allowedCount);
 	return result;
 }
 
@@ -994,8 +950,8 @@ int main(int argc, char** argv)
 	}
 	std::cerr << "pick longest alignments" << std::endl;
 	auto longestAlns = pickLongestPerRead(paths, inputOverlaps, initialMaxPick);
-	std::cerr << "pick-cut alignments" << std::endl;
-	auto pickedAlns = zipCutAlignments(paths, longestAlns, inputOverlaps, coverageDifferenceCutoff);
+	std::cerr << "pick-add alignments" << std::endl;
+	auto pickedAlns = zipAddAlignments(paths, longestAlns, inputOverlaps, coverageDifferenceCutoff);
 	std::cerr << "get transitive closure" << std::endl;
 	auto transitiveClosures = getTransitiveClosures(paths, pickedAlns, inputOverlaps);
 	std::cerr << "deallocate picked" << std::endl;
