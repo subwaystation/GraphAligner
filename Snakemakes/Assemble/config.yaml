@@ -17,7 +17,8 @@ SmallK: 21
 BigK: 63
 Abundance: 2
 
-MaxOverlapCount: 10
+InitialOverlapCount: 20
+RepeatCoverageCutoff: 10
 MinOverlapLength: 100
 MinOverlapIdentity: 0.8
 

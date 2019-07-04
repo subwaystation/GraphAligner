@@ -16,7 +16,8 @@ LONGREADS = config["LongReads"]
 SMALLK = config["SmallK"]
 BIGK = config["BigK"]
 ABUNDANCE = config["Abundance"]
-MAXOVERLAPCOUNT = config["MaxOverlapCount"]
+INITIALOVERLAPCOUNT = config["InitialOverlapCount"]
+REPEATCOVERAGECUTOFF = config["RepeatCoverageCutoff"]
 MINOVERLAPLENGTH = config["MinOverlapLength"]
 MINOVERLAPIDENTITY = config["MinOverlapIdentity"]
 
@@ -24,7 +25,7 @@ SHORTREADNAMES = [n.split('.')[0] for n in SHORTREADS]
 SHORTREADEXTENSIONS = ['.'.join(n.split('.')[1:]) for n in SHORTREADS]
 
 wildcard_constraints:
-	graph = "assembly((-unitig)|(-untip)|(-topo)|(-withchains)|(-repeat)|(-cycle)|(-collapsed))*"
+	graph = "assembly((-unitig)|(-untip)|(-topo)|(-withchains)|(-repeat)|(-cycle)|(-collapsed)|(-sized))*"
 
 rule all:
 	input:
@@ -113,12 +114,11 @@ rule initial_assembly:
 	output:
 		assembly = TMPDIR + "assembly.gfa",
 		translatedreads = TMPDIR + "alns-translated.gam"
-	threads: 40
 	log:
 		stdout = TMPDIR + "assemble_stdout.txt",
 		stderr = TMPDIR + "assemble_stderr.txt"
 	shell:
-		"/usr/bin/time -v {ALIGNERBINDIR}AssembleByAlignment {input.graph} {input.alignments} {input.overlaps} {output.assembly} {output.translatedreads} {MAXOVERLAPCOUNT} 1> {log.stdout} 2> {log.stderr}"
+		"/usr/bin/time -v {ALIGNERBINDIR}AssembleByAlignment {input.graph} {input.alignments} {input.overlaps} {output.assembly} {output.translatedreads} {INITIALOVERLAPCOUNT} {REPEATCOVERAGECUTOFF} 1> {log.stdout} 2> {log.stderr}"
 
 rule unitigify:
 	input: TMPDIR + "{graph}.gfa"
@@ -159,25 +159,37 @@ rule resolve_small_cycles:
 	output: temp(TMPDIR + "{graph}-cycle.gfa")
 	shell: "{ALIGNERSCRIPTDIR}resolve_short_repeats.py {input} {output}"
 
-rule translate_1:
+rule filter_size:
+	input: TMPDIR + "{graph}.gfa",
+	output: temp(TMPDIR + "{graph}-sized.gfa")
+	shell: "{ALIGNERSCRIPTDIR}filter_small_components.py {input} 10000 {output}"
+
+rule realign:
 	input:
-		alns = rules.initial_assembly.output.translatedreads,
-		translation = TMPDIR + "assembly-untip-unitig-translation.txt"
-	output: temp(TMPDIR + "translated-1.gam")
-	shell: "{ALIGNERBINDIR}TranslatePath {input.alns} {input.translation} {output}"
+		graph = TMPDIR + "assembly-untip-unitig.gfa",
+		reads = expand(LONGREADDIR + "{name}", name=LONGREADS)
+	params:
+		readconcat = lambda wildcards, input: ' '.join(input.reads)
+	output: temp(TMPDIR + "realigned.gam")
+	log:
+		stdout = TMPDIR + "realign_stdout.txt",
+		stderr = TMPDIR + "realign_stderr.txt"
+	threads: 40
+	shell:
+		"/usr/bin/time -v {ALIGNERBINDIR}GraphAligner -g {input.graph} -a {output} -f {params.readconcat} -t {threads} 1> {log.stdout} 2> {log.stderr}"
 
 rule resolve_small_tangles:
 	input:
 		graph = TMPDIR + "assembly-untip-unitig-withchains.gfa",
-		alns = TMPDIR + "translated-1.gam"
+		alns = TMPDIR + "realigned.gam"
 	output: temp(TMPDIR + "assembly-untip-unitig-repeat.gfa")
 	shell: "{ALIGNERBINDIR}ResolveSmallTangles {input.graph} {input.alns} 1000 {GENOMESIZE} {output} /dev/null"
 
 rule final:
 	input:
-		graph_collapsed = TMPDIR + "assembly-untip-unitig-repeat-unitig-cycle-unitig-collapsed-unitig.gfa",
-		graph_withchains = TMPDIR + "assembly-untip-unitig-repeat-unitig-cycle-unitig-withchains.gfa",
-		graph_chains = TMPDIR + "assembly-untip-unitig-repeat-unitig-cycle-unitig-chains.gfa"
+		graph_collapsed = TMPDIR + "assembly-untip-unitig-repeat-unitig-cycle-unitig-sized-collapsed-unitig.gfa",
+		graph_withchains = TMPDIR + "assembly-untip-unitig-repeat-unitig-cycle-unitig-sized-withchains.gfa",
+		graph_chains = TMPDIR + "assembly-untip-unitig-repeat-unitig-cycle-unitig-sized-chains.gfa"
 	output:
 		graph_collapsed = OUTDIR + "assembly_collapsed.gfa",
 		graph_withchains = OUTDIR + "assembly.gfa",
