@@ -68,6 +68,7 @@ bool operator<(const std::pair<size_t, NodePos>& left, const std::pair<size_t, N
 
 void WriteAlignment(std::ofstream& file, const Alignment& aln)
 {
+	write(file, (uint64_t)aln.alignmentID);
 	write(file, (uint32_t)aln.leftPath);
 	write(file, (uint32_t)aln.rightPath);
 	write(file, (uint32_t)aln.leftStart);

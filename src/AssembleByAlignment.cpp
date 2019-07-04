@@ -110,7 +110,7 @@ void set(Oriented2dVector<std::pair<size_t, NodePos>>& parent, std::pair<size_t,
 	parent[found] = find(parent, target);
 }
 
-TransitiveClosureMapping getTransitiveClosures(const std::vector<Path>& paths, const std::set<std::pair<size_t, size_t>>& pickedAlns, std::string overlapFile)
+TransitiveClosureMapping getTransitiveClosures(const std::vector<Path>& paths, const std::unordered_set<size_t>& pickedAlns, std::string overlapFile)
 {
 	TransitiveClosureMapping result;
 	Oriented2dVector<std::pair<size_t, NodePos>> parent;
@@ -126,7 +126,7 @@ TransitiveClosureMapping getTransitiveClosures(const std::vector<Path>& paths, c
 	}
 	{
 		StreamAlignments(overlapFile, [&parent, &pickedAlns](const Alignment& aln){
-			bool picked = pickedAlns.count(std::pair<size_t, size_t>{aln.leftPath, aln.rightPath}) == 1;
+			bool picked = pickedAlns.count(aln.alignmentID) == 1;
 			if (!picked) return;
 			for (auto match : aln.alignedPairs)
 			{
@@ -460,7 +460,7 @@ bool maybeForbid(size_t forbidThis, std::vector<size_t>& componentCount, const s
 	return true;
 }
 
-std::set<std::pair<size_t, size_t>> zipCutAlignments(const std::vector<Path>& paths, const std::set<std::pair<size_t, size_t>>& initialPick, std::string alnFile, int coverageDifferenceCutoff)
+std::unordered_set<size_t> zipCutAlignments(const std::vector<Path>& paths, const std::unordered_set<size_t>& initialPick, std::string alnFile, int coverageDifferenceCutoff)
 {
 	std::vector<std::vector<std::pair<size_t, size_t>>> edges;
 	std::vector<bool> forbidden;
@@ -468,7 +468,7 @@ std::set<std::pair<size_t, size_t>> zipCutAlignments(const std::vector<Path>& pa
 	std::vector<size_t> nodeBelongsToRead;
 	std::vector<size_t> componentCount;
 	StreamAlignments(alnFile, [&alns, &initialPick](const Alignment& aln){
-		auto key = std::make_pair(aln.leftPath, aln.rightPath);
+		auto key = aln.alignmentID;
 		if (initialPick.count(key) == 0) return;
 		alns.emplace_back(aln);
 	});
@@ -525,18 +525,18 @@ std::set<std::pair<size_t, size_t>> zipCutAlignments(const std::vector<Path>& pa
 	}
 	std::cerr << forbiddenCount << " forbidden overlaps" << std::endl;
 	std::cerr << "get allowed" << std::endl;
-	std::set<std::pair<size_t, size_t>> result;
+	std::unordered_set<size_t> result;
 	for (size_t i = 0; i < alns.size(); i++)
 	{
 		if (forbidden[i]) continue;
-		std::pair<size_t, size_t> key { alns[i].leftPath, alns[i].rightPath };
+		size_t key = alns[i].alignmentID;
 		result.insert(key);
 	}
 	std::cerr << result.size() << " allowed overlaps" << std::endl;
 	return result;
 }
 
-std::set<std::pair<size_t, size_t>> pickLongestPerRead(const std::vector<Path>& paths, std::string alnFile, size_t maxNum)
+std::unordered_set<size_t> pickLongestPerRead(const std::vector<Path>& paths, std::string alnFile, size_t maxNum)
 {
 	std::vector<Alignment> alns;
 	StreamAlignments(alnFile, [&alns](const Alignment& aln){
@@ -544,6 +544,7 @@ std::set<std::pair<size_t, size_t>> pickLongestPerRead(const std::vector<Path>& 
 		decltype(aln.alignedPairs) tmp;
 		std::swap(tmp, alns.back().alignedPairs);
 	});
+	std::cerr << alns.size() << " raw overlaps" << std::endl;
 	std::vector<std::vector<size_t>> leftAlnsPerRead;
 	std::vector<std::vector<size_t>> rightAlnsPerRead;
 	std::vector<int> picked;
@@ -594,12 +595,16 @@ std::set<std::pair<size_t, size_t>> pickLongestPerRead(const std::vector<Path>& 
 			picked[index] += 1;
 		}
 	}
-	std::set<std::pair<size_t, size_t>> result;
+	std::unordered_set<size_t> result;
 	for (size_t i = 0; i < alns.size(); i++)
 	{
 		assert(picked[i] >= 0);
 		assert(picked[i] <= 4);
-		if (picked[i] == 4) result.emplace(alns[i].leftPath, alns[i].rightPath);
+		if (picked[i] == 4)
+		{
+			assert(result.count(alns[i].alignmentID) == 0);
+			result.emplace(alns[i].alignmentID);
+		}
 	}
 	std::cerr << result.size() << " alignments after picking longest" << std::endl;
 	return result;

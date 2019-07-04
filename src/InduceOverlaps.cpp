@@ -195,6 +195,7 @@ void induceOverlaps(const std::vector<Path>& paths, const std::unordered_map<int
 	size_t alnCount = 0;
 	std::thread overlapWriter { [&alnCount, tempAlnFileName, &overlapsFinished, &writequeue](){
 		std::ofstream outfile { tempAlnFileName, std::ios::out | std::ios::binary };
+		size_t nextID = 0;
 		while (true)
 		{
 			Alignment alns[100] {};
@@ -211,6 +212,8 @@ void induceOverlaps(const std::vector<Path>& paths, const std::unordered_map<int
 			}
 			for (size_t i = 0; i < gotOverlaps; i++)
 			{
+				alns[i].alignmentID = nextID;
+				nextID += 1;
 				WriteAlignment(outfile, alns[i]);
 			}
 			alnCount += gotOverlaps;

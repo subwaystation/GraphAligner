@@ -22,6 +22,7 @@ struct AlignmentMatch
 
 struct Alignment
 {
+	size_t alignmentID;
 	size_t leftPath;
 	size_t rightPath;
 	std::vector<AlignmentMatch> alignedPairs;
@@ -57,6 +58,7 @@ void StreamAlignments(std::string filename, F f)
 	while (file.good())
 	{
 		Alignment result;
+		result.alignmentID = read<uint64_t>(file);
 		result.leftPath = read<uint32_t>(file);
 		result.rightPath = read<uint32_t>(file);
 		result.leftStart = read<uint32_t>(file);
@@ -75,6 +77,7 @@ void StreamAlignments(std::string filename, F f)
 			result.alignedPairs[i].leftReverse = read<char>(file);
 			result.alignedPairs[i].rightReverse = read<char>(file);
 		}
+		if (!file.good()) break;
 		f(result);
 	}
 }
