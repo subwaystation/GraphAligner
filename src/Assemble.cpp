@@ -13,10 +13,10 @@ Path Path::Reverse() const
 	return result;
 }
 
-bool AlignmentMatchCompareLT(const Alignment& left, const Alignment& right)
-{
-	return left.alignmentLength * left.alignmentIdentity < right.alignmentLength * right.alignmentIdentity;
-}
+// bool AlignmentMatchCompareLT(const Alignment& left, const Alignment& right)
+// {
+// 	return left.alignmentLength * left.alignmentIdentity < right.alignmentLength * right.alignmentIdentity;
+// }
 
 AlignmentMatchComparerLT::AlignmentMatchComparerLT(const std::vector<Alignment>& paths) :
 paths(&paths)
@@ -37,10 +37,10 @@ bool AlignmentMatchComparerLT::operator()(size_t left, size_t right) const
 	return AlignmentMatchCompareLT(paths->at(left), paths->at(right));
 }
 
-bool AlignmentQualityCompareLT(const Alignment& left, const Alignment& right)
-{
-	return left.alignmentIdentity < right.alignmentIdentity;
-}
+// bool AlignmentQualityCompareLT(const Alignment& left, const Alignment& right)
+// {
+// 	return left.alignmentIdentity < right.alignmentIdentity;
+// }
 
 AlignmentQualityComparerLT::AlignmentQualityComparerLT(const std::vector<Alignment>& paths) :
 paths(&paths)
@@ -77,7 +77,8 @@ void WriteAlignment(std::ofstream& file, const Alignment& aln)
 	write(file, (uint32_t)aln.rightEnd);
 	write(file, (char)aln.rightReverse);
 	write(file, (uint64_t)aln.alignmentLength);
-	write(file, (double)aln.alignmentIdentity);
+	write(file, (uint64_t)aln.matches);
+	write(file, (uint64_t)aln.mismatches);
 	write(file, (uint32_t)aln.alignedPairs.size());
 	for (size_t i = 0; i < aln.alignedPairs.size(); i++)
 	{

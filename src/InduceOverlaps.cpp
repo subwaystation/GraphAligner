@@ -73,7 +73,8 @@ Alignment approxAlign(const Path& leftPath, const Path& rightPath, const std::un
 	{
 		Alignment result;
 		result.alignmentLength = 0;
-		result.alignmentIdentity = 0;
+		result.matches = 0;
+		result.mismatches = 0;
 		return result;
 	}
 	int diagonalMin = ((int)maxParallelogram - 1) * bandwidth - (int)rightCumulativePrefixLength.back();
@@ -103,7 +104,8 @@ Alignment approxAlign(const Path& leftPath, const Path& rightPath, const std::un
 	if (result.alignedPairs.size() == 0)
 	{
 		result.alignmentLength = 0;
-		result.alignmentIdentity = 0;
+		result.matches = 0;
+		result.mismatches = 0;
 		return result;
 	}
 	result.leftStart = result.alignedPairs[0].leftIndex;
@@ -128,7 +130,8 @@ Alignment approxAlign(const Path& leftPath, const Path& rightPath, const std::un
 	assert(result.leftEnd == leftPath.position.size()-1 || result.rightEnd == rightPath.position.size()-1);
 	result.alignmentLength = std::max(leftCumulativePrefixLength[result.leftEnd+1] - leftCumulativePrefixLength[result.leftStart], rightCumulativePrefixLength[result.rightEnd+1] - rightCumulativePrefixLength[result.rightStart]);
 	assert(result.alignmentLength >= matches);
-	result.alignmentIdentity = (double)matches / (double)result.alignmentLength;
+	result.matches = matches;
+	result.mismatches = result.alignmentLength - result.matches;
 	return result;
 }
 
@@ -267,7 +270,7 @@ void induceOverlaps(const std::vector<Path>& paths, const std::unordered_map<int
 						if (i == j) continue;
 						Alignment fwAln;
 						fwAln = approxAlign(paths[j], paths[i], nodeSizes, cumulativePrefixLengths[j], cumulativePrefixLengths[i], occurrences, j, i, mismatchPenalty, bandwidth);
-						if (fwAln.alignmentLength >= minAlnLength && fwAln.alignmentIdentity >= minAlnIdentity)
+						if (fwAln.alignmentLength >= 0)
 						{
 							for (size_t k = 0; k < fwAln.alignedPairs.size(); k++)
 							{
@@ -288,7 +291,7 @@ void induceOverlaps(const std::vector<Path>& paths, const std::unordered_map<int
 						if (i == j) continue;
 						Alignment bwAln;
 						bwAln = approxAlign(paths[j], reversePath, nodeSizes, cumulativePrefixLengths[j], reverseCumulativePrefixLengths, reverseOccurrences, j, i, mismatchPenalty, bandwidth);
-						if (bwAln.alignmentLength >= minAlnLength && bwAln.alignmentIdentity >= minAlnIdentity)
+						if (bwAln.alignmentLength >= 0)
 						{
 							bwAln.rightStart = paths[i].position.size() - 1 - bwAln.rightStart;
 							bwAln.rightEnd = paths[i].position.size() - 1 - bwAln.rightEnd;

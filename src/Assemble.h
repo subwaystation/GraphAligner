@@ -31,8 +31,9 @@ struct Alignment
 	size_t rightStart;
 	size_t rightEnd;
 	bool rightReverse;
+	size_t matches;
+	size_t mismatches;
 	size_t alignmentLength;
-	double alignmentIdentity;
 };
 
 template <typename T>
@@ -67,7 +68,8 @@ void StreamAlignments(std::string filename, F f)
 		result.rightEnd = read<uint32_t>(file);
 		result.rightReverse = read<char>(file);
 		result.alignmentLength = read<uint64_t>(file);
-		result.alignmentIdentity = read<double>(file);
+		result.matches = read<uint64_t>(file);
+		result.mismatches = read<uint64_t>(file);
 		size_t numMatches = read<uint32_t>(file);
 		result.alignedPairs.resize(numMatches);
 		for (size_t i = 0; i < numMatches; i++)
@@ -83,7 +85,7 @@ void StreamAlignments(std::string filename, F f)
 }
 
 bool AlignmentMatchCompareLT(const Alignment& left, const Alignment& right);
-bool AlignmentIdentityCompareLT(const Alignment& left, const Alignment& right);
+// bool AlignmentIdentityCompareLT(const Alignment& left, const Alignment& right);
 
 struct AlignmentMatchComparerLT
 {

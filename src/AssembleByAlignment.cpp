@@ -93,6 +93,30 @@ void set(std::map<T, T>& parent, T key, T target)
 	parent[found] = find(parent, target);
 }
 
+template <typename T>
+T find(std::unordered_map<T, T>& parent, T key)
+{
+	if (parent.count(key) == 0)
+	{
+		parent[key] = key;
+		return key;
+	}
+	if (parent.at(key) == key)
+	{
+		return key;
+	}
+	auto result = find(parent, parent.at(key));
+	parent[key] = result;
+	return result;
+}
+
+template <typename T>
+void set(std::unordered_map<T, T>& parent, T key, T target)
+{
+	auto found = find(parent, key);
+	parent[found] = find(parent, target);
+}
+
 std::pair<size_t, NodePos> find(Oriented2dVector<std::pair<size_t, NodePos>>& parent, std::pair<size_t, NodePos> key)
 {
 	if (parent[key] == key)
@@ -489,6 +513,58 @@ std::unordered_set<size_t> zipAddAlignments(const std::vector<Path>& paths, cons
 	}
 	std::cerr << result.size() << " allowed overlaps" << std::endl;
 	assert(result.size() == allowedCount);
+	return result;
+}
+
+void addForbiddenOverlaps(std::unordered_set<size_t>& forbiddenOverlaps, const std::unordered_set<size_t>& nodes, const std::unordered_set<size_t>& conflictEdges, const std::vector<Alignment>& alns)
+{
+	
+}
+
+std::unordered_set<size_t> pickGroupAlignments(const std::vector<Path>& paths, const std::string& alnFile, double zeroIdentity, double groupCutoff)
+{
+	double matchScore = (1.0 - zeroIdentity) / zeroIdentity;
+	double mismatchScore = zeroIdentity / (1.0 / zeroIdentity);
+	std::vector<Alignment> alns;
+	std::unordered_set<size_t> conflictEdges;
+	StreamAlignments(alnFile, [&alns, &conflictEdges, matchScore, mismatchScore](const Alignment& aln){
+		assert(aln.alignmentID == alns.size());
+		alns.emplace_back(aln);
+		decltype(aln.alignedPairs) tmp;
+		std::swap(tmp, alns.back().alignedPairs);
+		if (aln.matches * matchScore + aln.mismatches * mismatchScore < 0) conflictEdges.insert(aln.alignmentID);
+	});
+	std::cerr << alns.size() << " raw overlaps" << std::endl;
+	std::unordered_map<size_t, size_t> conflictGroup;
+	for (auto edge : conflictEdges)
+	{
+		set(conflictGroup, edge.leftPath, edge.rightPath);
+	}
+	std::unordered_map<size_t, size_t> groupIndex;
+	std::vector<std::unordered_set<size_t>> conflictGroups;
+	for (auto edge : conflictEdges)
+	{
+		if (groupIndex.count(find(conflictGroup, edge.leftIndex)) == 0)
+		{
+			groupIndex[find(conflictGroup, edge.leftIndex)] = conflictGroups.size();
+			conflictGroups.emplace_back();
+		}
+		conflictGroups[groupIndex[find(conflictGroup, edge.leftIndex)]].insert(edge.leftPath);
+		conflictGroups[groupIndex[find(conflictGroup, edge.leftIndex)]].insert(edge.rightPath);
+	}
+	std::unordered_set<size_t> forbiddenOverlaps;
+	for (auto group : conflictGroups)
+	{
+		addForbiddenOverlaps(forbiddenOverlaps, group, conflictEdges, alns);
+	}
+	std::cerr << forbiddenOverlaps.size() << " forbidden overlaps";
+	std::unordered_set<size_t> result;
+	for (size_t i = 0; i < alns.size(); i++)
+	{
+		if (forbiddenOverlaps.count(i) == 1) continue;
+		result.insert(i);
+	}
+	std::cerr << result.size() << " allowed overlaps";
 	return result;
 }
 
@@ -936,7 +1012,9 @@ int main(int argc, char** argv)
 	std::string outputGraph { argv[4] };
 	std::string outputPaths { argv[5] };
 	int initialMaxPick = std::stoi(argv[6]);
-	int coverageDifferenceCutoff = std::stoi(argv[7]);
+	double zeroIdentity = std::stod(argv[7]);
+	double groupCutoff = std::stod(argv[8]);
+	// int coverageDifferenceCutoff = std::stoi(argv[7]);
 
 	std::cerr << "load graph" << std::endl;
 	auto graph = GfaGraph::LoadFromFile(inputGraph);
@@ -948,10 +1026,12 @@ int main(int argc, char** argv)
 		paths = loadAlignmentsAsPaths(inputAlns, 1000, nodeSizes);
 		std::cerr << paths.size() << " paths after filtering by length" << std::endl;
 	}
-	std::cerr << "pick longest alignments" << std::endl;
-	auto longestAlns = pickLongestPerRead(paths, inputOverlaps, initialMaxPick);
-	std::cerr << "pick-add alignments" << std::endl;
-	auto pickedAlns = zipAddAlignments(paths, longestAlns, inputOverlaps, coverageDifferenceCutoff);
+	std::cerr << "pick-group alignments" << std::endl;
+	auto pickedAlns = pickGroupAlignments(paths, inputOverlaps, zeroIdentity, groupCutoff)
+	// std::cerr << "pick longest alignments" << std::endl;
+	// auto longestAlns = pickLongestPerRead(paths, inputOverlaps, initialMaxPick);
+	// std::cerr << "pick-add alignments" << std::endl;
+	// auto pickedAlns = zipAddAlignments(paths, longestAlns, inputOverlaps, coverageDifferenceCutoff);
 	std::cerr << "get transitive closure" << std::endl;
 	auto transitiveClosures = getTransitiveClosures(paths, pickedAlns, inputOverlaps);
 	std::cerr << "deallocate picked" << std::endl;
