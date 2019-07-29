@@ -647,8 +647,12 @@ bool isAllowedToMerge(std::vector<size_t>& parent, const std::vector<size_t>& le
 	{
 		auto leftp = find(pathToNode[aln.leftPath][pair.leftIndex], parent);
 		auto rightp = find(pathToNode[aln.rightPath][pair.rightIndex], parent);
-		if (forbiddenMerges.count(leftp) == 0) continue;
-		if (forbiddenMerges.at(leftp).count(rightp) == 1) return false;
+		if (forbiddenMerges.count(leftp) == 0 || forbiddenMerges.count(rightp) == 0) continue;
+		for (auto group : forbiddenMerges.at(leftp))
+		{
+			size_t forbidGroup = (group / 2) * 2 + 1 - (group % 2);
+			if (forbiddenMerges.at(rightp).count(forbidGroup) == 1) return false;
+		}
 	}
 	return true;
 }
@@ -671,12 +675,7 @@ void merge(std::vector<size_t>& parent, std::vector<size_t>& left, std::vector<s
 		right[rightp] = leftRight;
 		if (forbiddenMerges.count(rightp) == 1)
 		{
-			size_t leftForbidden = rightp;
-			for (auto rightForbidden : forbiddenMerges.at(rightp))
-			{
-				forbiddenMerges[find(leftForbidden, parent)].insert(find(rightForbidden, parent));
-				forbiddenMerges[find(rightForbidden, parent)].insert(find(leftForbidden, parent));
-			}
+			forbiddenMerges[leftp].insert(forbiddenMerges.at(rightp).begin(), forbiddenMerges.at(rightp).end());
 		}
 	}
 }
@@ -700,32 +699,33 @@ std::unordered_set<size_t> pickNonForbiddenMergingAlns(const std::vector<Path>& 
 			nextNodeId += 1;
 		}
 	}
+	size_t nextForbiddenMerge = 0;
 	std::unordered_map<size_t, std::unordered_set<size_t>> forbiddenMerges;
-	size_t numForbiddenMerges = 0;
-	StreamAlignments(alnFile, [&alns, &forbiddenMerges, &nodesInPath, &paths, &pathToNode, &numForbiddenMerges, matchScore, mismatchScore](Alignment& aln){
+	StreamAlignments(alnFile, [&alns, &forbiddenMerges, &nodesInPath, &paths, &pathToNode, &nextForbiddenMerge, matchScore, mismatchScore](Alignment& aln){
 		assert(aln.alignmentID == alns.size());
 		assert(aln.leftPath < pathToNode.size());
 		assert(aln.rightPath < pathToNode.size());
-		if (aln.matches * matchScore + aln.mismatches * mismatchScore < 0)
+		if ((double)aln.matches * matchScore + (double)aln.mismatches * mismatchScore < -500)
 		{
-			for (size_t i = 0; i < paths[aln.leftPath].position.size(); i++)
+			for (auto pair : nodesInPath[aln.leftPath])
 			{
-				auto node = paths[aln.leftPath].position[i].id;
-				size_t left = pathToNode[aln.leftPath][i];
-				if (nodesInPath[aln.rightPath].count(node) == 0) continue;
-				for (auto right : nodesInPath[aln.rightPath][node])
+				if (nodesInPath[aln.rightPath].count(pair.first) == 0) continue;
+				for (auto node : pair.second)
 				{
-					forbiddenMerges[left].insert(right);
-					forbiddenMerges[right].insert(left);
-					numForbiddenMerges += 1;
+					forbiddenMerges[node].insert(nextForbiddenMerge);
 				}
+				for (auto node : nodesInPath[aln.rightPath].at(pair.first))
+				{
+					forbiddenMerges[node].insert(nextForbiddenMerge + 1);
+				}
+				nextForbiddenMerge += 2;
 			}
 		}
 		alns.emplace_back(std::move(aln));
 	});
 	std::cerr << alns.size() << " raw overlaps" << std::endl;
 	std::sort(alns.begin(), alns.end(), [matchScore, mismatchScore](const Alignment& left, const Alignment& right) { return left.matches * matchScore + left.mismatches * mismatchScore < right.matches * matchScore + right.mismatches * mismatchScore; });
-	std::cerr << numForbiddenMerges << " forbidden merges" << std::endl;
+	std::cerr << (nextForbiddenMerge / 2) << " forbidden mergesets" << std::endl;
 	std::vector<size_t> parent;
 	std::vector<size_t> left;
 	std::vector<size_t> right;
@@ -742,7 +742,7 @@ std::unordered_set<size_t> pickNonForbiddenMergingAlns(const std::vector<Path>& 
 	for (size_t i = alns.size()-1; i < alns.size(); i--)
 	{
 		const Alignment& aln = alns[i];
-		if (matchScore * aln.matches + mismatchScore * aln.mismatches < groupCutoff)
+		if (matchScore * (double)aln.matches + mismatchScore * (double)aln.mismatches < 500)
 		{
 			forbiddenOverlaps.insert(aln.alignmentID);
 			continue;
