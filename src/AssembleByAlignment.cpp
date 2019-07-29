@@ -263,27 +263,27 @@ DoublestrandedTransitiveClosureMapping mergeDoublestrandClosures(const std::vect
 	return result;
 }
 
-std::vector<Alignment> doubleAlignments(const std::vector<Alignment>& alns)
-{
-	std::vector<Alignment> result = alns;
-	result.reserve(alns.size() * 2);
-	for (auto aln : alns)
-	{
-		result.emplace_back();
-		result.back().alignmentLength = aln.alignmentLength;
-		result.back().alignmentIdentity = aln.alignmentIdentity;
-		result.back().leftPath = aln.leftPath;
-		result.back().rightPath = aln.rightPath;
-		result.back().alignedPairs = aln.alignedPairs;
-		for (size_t i = 0; i < result.back().alignedPairs.size(); i++)
-		{
-			result.back().alignedPairs[i].leftReverse = !result.back().alignedPairs[i].leftReverse;
-			result.back().alignedPairs[i].rightReverse = !result.back().alignedPairs[i].rightReverse;
-		}
-	}
-	std::cerr << result.size() << " alignments after doubling" << std::endl;
-	return result;
-}
+// std::vector<Alignment> doubleAlignments(const std::vector<Alignment>& alns)
+// {
+// 	std::vector<Alignment> result = alns;
+// 	result.reserve(alns.size() * 2);
+// 	for (auto aln : alns)
+// 	{
+// 		result.emplace_back();
+// 		result.back().alignmentLength = aln.alignmentLength;
+// 		result.back().alignmentIdentity = aln.alignmentIdentity;
+// 		result.back().leftPath = aln.leftPath;
+// 		result.back().rightPath = aln.rightPath;
+// 		result.back().alignedPairs = aln.alignedPairs;
+// 		for (size_t i = 0; i < result.back().alignedPairs.size(); i++)
+// 		{
+// 			result.back().alignedPairs[i].leftReverse = !result.back().alignedPairs[i].leftReverse;
+// 			result.back().alignedPairs[i].rightReverse = !result.back().alignedPairs[i].rightReverse;
+// 		}
+// 	}
+// 	std::cerr << result.size() << " alignments after doubling" << std::endl;
+// 	return result;
+// }
 
 std::vector<Alignment> removeContained(const std::vector<Path>& paths, const std::vector<Alignment>& original)
 {
@@ -319,34 +319,34 @@ std::vector<Alignment> removeContained(const std::vector<Path>& paths, const std
 	return result;
 }
 
-std::vector<Alignment> pickLowestErrorPerRead(const std::vector<Path>& paths, const std::vector<Alignment>& alns, size_t maxNum)
-{
-	std::vector<std::vector<Alignment>> alnsPerRead;
-	alnsPerRead.resize(paths.size());
-	for (auto aln : alns)
-	{
-		alnsPerRead[aln.leftPath].push_back(aln);
-		alnsPerRead[aln.rightPath].push_back(aln);
-	}
-	std::vector<Alignment> result;
-	for (size_t i = 0; i < alnsPerRead.size(); i++)
-	{
-		if (alnsPerRead[i].size() > maxNum)
-		{
-			std::sort(alnsPerRead[i].begin(), alnsPerRead[i].end(), [](const Alignment& left, const Alignment& right){ return left.alignmentIdentity < right.alignmentIdentity; });
-			for (size_t j = alnsPerRead[i].size() - maxNum; j < alnsPerRead[i].size(); j++)
-			{
-				result.push_back(alnsPerRead[i][j]);
-			}
-		}
-		else
-		{
-			result.insert(result.end(), alnsPerRead[i].begin(), alnsPerRead[i].end());
-		}
-	}
-	std::cerr << result.size() << " alignments after picking lowest erro" << std::endl;
-	return result;
-}
+// std::vector<Alignment> pickLowestErrorPerRead(const std::vector<Path>& paths, const std::vector<Alignment>& alns, size_t maxNum)
+// {
+// 	std::vector<std::vector<Alignment>> alnsPerRead;
+// 	alnsPerRead.resize(paths.size());
+// 	for (auto aln : alns)
+// 	{
+// 		alnsPerRead[aln.leftPath].push_back(aln);
+// 		alnsPerRead[aln.rightPath].push_back(aln);
+// 	}
+// 	std::vector<Alignment> result;
+// 	for (size_t i = 0; i < alnsPerRead.size(); i++)
+// 	{
+// 		if (alnsPerRead[i].size() > maxNum)
+// 		{
+// 			std::sort(alnsPerRead[i].begin(), alnsPerRead[i].end(), [](const Alignment& left, const Alignment& right){ return left.alignmentIdentity < right.alignmentIdentity; });
+// 			for (size_t j = alnsPerRead[i].size() - maxNum; j < alnsPerRead[i].size(); j++)
+// 			{
+// 				result.push_back(alnsPerRead[i][j]);
+// 			}
+// 		}
+// 		else
+// 		{
+// 			result.insert(result.end(), alnsPerRead[i].begin(), alnsPerRead[i].end());
+// 		}
+// 	}
+// 	std::cerr << result.size() << " alignments after picking lowest erro" << std::endl;
+// 	return result;
+// }
 
 void assignToGroupRec(size_t group, size_t i, size_t j, std::vector<std::vector<size_t>>& belongsToGroup, const std::vector<std::vector<std::vector<std::pair<size_t, size_t>>>>& edges, std::vector<std::vector<std::pair<size_t, size_t>>>& groups)
 {
@@ -454,193 +454,390 @@ bool maybeAllow(size_t allowThis, std::vector<size_t>& parent, std::vector<size_
 	return true;
 }
 
-std::unordered_set<size_t> zipAddAlignments(const std::vector<Path>& paths, const std::unordered_set<size_t>& initialPick, std::string alnFile, int coverageDifferenceCutoff)
+// std::unordered_set<size_t> zipAddAlignments(const std::vector<Path>& paths, const std::unordered_set<size_t>& initialPick, std::string alnFile, int coverageDifferenceCutoff)
+// {
+// 	std::vector<Alignment> alns;
+// 	std::vector<bool> picked;
+// 	StreamAlignments(alnFile, [&alns, &initialPick](const Alignment& aln){
+// 		if (initialPick.count(aln.alignmentID) == 0) return;
+// 		alns.emplace_back(aln);
+// 	});
+// 	std::cerr << alns.size() << " overlaps" << std::endl;
+// 	size_t nodeCount = 0;
+// 	picked.resize(alns.size(), false);
+// 	std::vector<std::vector<size_t>> nodeNum;
+// 	nodeNum.resize(paths.size());
+// 	for (size_t i = 0; i < paths.size(); i++)
+// 	{
+// 		nodeNum[i].resize(paths[i].position.size());
+// 		for (size_t j = 0; j < paths[i].position.size(); j++)
+// 		{
+// 			nodeNum[i][j] = nodeCount;
+// 			nodeCount++;
+// 		}
+// 	}
+// 	std::cerr << nodeCount << " nodes" << std::endl;
+// 	std::vector<size_t> parent;
+// 	std::vector<size_t> componentSize;
+// 	componentSize.resize(nodeCount, 1);
+// 	parent.resize(nodeCount, 0);
+// 	for (size_t i = 0; i < nodeCount; i++)
+// 	{
+// 		parent[i] = i;
+// 	}
+// 	std::vector<size_t> worstAlignments;
+// 	worstAlignments.reserve(alns.size());
+// 	for (size_t i = 0; i < alns.size(); i++)
+// 	{
+// 		worstAlignments.push_back(i);
+// 	}
+// 	std::sort(worstAlignments.begin(), worstAlignments.end(), [&alns](size_t left, size_t right) { return alns[left].alignmentLength * alns[left].alignmentIdentity < alns[right].alignmentLength * alns[right].alignmentIdentity; });
+// 	std::cerr << "allow from best to worst" << std::endl;
+// 	size_t allowedCount = 0;
+// 	for (size_t i = worstAlignments.size()-1; i < worstAlignments.size(); i--)
+// 	{
+// 		size_t aln = worstAlignments[i];
+// 		assert(!picked[aln]);
+// 		bool allowed = maybeAllow(aln, parent, componentSize, picked, alns, nodeNum, coverageDifferenceCutoff);
+// 		if (allowed) std::cerr << "!"; else std::cerr << ".";
+// 		if (allowed) allowedCount += 1;
+// 	}
+// 	std::cerr << allowedCount << " allowed overlaps" << std::endl;
+// 	std::unordered_set<size_t> result;
+// 	for (size_t i = 0; i < alns.size(); i++)
+// 	{
+// 		if (!picked[i]) continue;
+// 		size_t key = alns[i].alignmentID;
+// 		assert(result.count(key) == 0);
+// 		result.insert(key);
+// 	}
+// 	std::cerr << result.size() << " allowed overlaps" << std::endl;
+// 	assert(result.size() == allowedCount);
+// 	return result;
+// }
+
+struct OverlapQueueItem
 {
+	size_t node;
+	size_t group;
+	double score;
+	OverlapQueueItem(size_t node, size_t group, double score) :
+	node(node), group(group), score(score)
+	{}
+	OverlapQueueItem() = default;
+	bool operator<(const OverlapQueueItem& other) const
+	{
+		return score < other.score;
+	}
+};
+
+void addForbiddenOverlaps(const double matchScore, const double mismatchScore, std::unordered_set<size_t>& forbiddenOverlaps, const std::unordered_set<size_t>& nodes, const std::vector<std::unordered_set<size_t>>& overlapsPerRead, const std::vector<Alignment>& alns, const double groupCutoff)
+{
+	std::unordered_set<size_t> checkedEdges;
+	size_t oldForbiddenSize = forbiddenOverlaps.size();
+	while (true)
+	{
+		double biggestNegative = 0;
+		size_t biggestNegativeIndex = alns.size();
+		std::vector<std::unordered_map<size_t, double>> scoreToGroup;
+		std::unordered_map<size_t, size_t> currentGroup;
+		scoreToGroup.resize(3);
+		for (auto node : nodes)
+		{
+			for (auto overlap : overlapsPerRead[node])
+			{
+				if (checkedEdges.count(overlap) == 1) continue;
+				double scoreHere = (double)alns[overlap].matches * matchScore + (double)alns[overlap].mismatches * mismatchScore;
+				if (scoreHere < biggestNegative)
+				{
+					biggestNegative = scoreHere;
+					biggestNegativeIndex = overlap;
+				}
+			}
+		}
+		if (biggestNegative >= 0) break;
+		assert(biggestNegative < 0);
+		// if (biggestNegative > -groupCutoff) return;
+		checkedEdges.insert(biggestNegativeIndex);
+		assert(biggestNegativeIndex < alns.size());
+		assert(alns[biggestNegativeIndex].leftPath != alns[biggestNegativeIndex].rightPath);
+		std::priority_queue<OverlapQueueItem> queue;
+		currentGroup[alns[biggestNegativeIndex].leftPath] = 1;
+		currentGroup[alns[biggestNegativeIndex].rightPath] = 2;
+		assert(nodes.count(alns[biggestNegativeIndex].leftPath) == 1);
+		assert(nodes.count(alns[biggestNegativeIndex].rightPath) == 1);
+		for (auto edge : overlapsPerRead[alns[biggestNegativeIndex].leftPath])
+		{
+			checkedEdges.insert(edge);
+			size_t other = alns[edge].leftPath;
+			if (other == alns[biggestNegativeIndex].leftPath) other = alns[edge].rightPath;
+			scoreToGroup[0][other] -= matchScore * (double)alns[edge].matches + mismatchScore * (double)alns[edge].mismatches;
+			scoreToGroup[1][other] += matchScore * (double)alns[edge].matches + mismatchScore * (double)alns[edge].mismatches;
+			scoreToGroup[2][other] -= matchScore * (double)alns[edge].matches + mismatchScore * (double)alns[edge].mismatches;
+			queue.emplace(other, 0, scoreToGroup[0][other]);
+			queue.emplace(other, 1, scoreToGroup[1][other]);
+			queue.emplace(other, 2, scoreToGroup[2][other]);
+		}
+		for (auto edge : overlapsPerRead[alns[biggestNegativeIndex].rightPath])
+		{
+			checkedEdges.insert(edge);
+			size_t other = alns[edge].leftPath;
+			if (other == alns[biggestNegativeIndex].rightPath) other = alns[edge].rightPath;
+			scoreToGroup[0][other] -= matchScore * (double)alns[edge].matches + mismatchScore * (double)alns[edge].mismatches;
+			scoreToGroup[1][other] -= matchScore * (double)alns[edge].matches + mismatchScore * (double)alns[edge].mismatches;
+			scoreToGroup[2][other] += matchScore * (double)alns[edge].matches + mismatchScore * (double)alns[edge].mismatches;
+			queue.emplace(other, 0, scoreToGroup[0][other]);
+			queue.emplace(other, 1, scoreToGroup[1][other]);
+			queue.emplace(other, 2, scoreToGroup[2][other]);
+		}
+		while (queue.size() > 0)
+		{
+			auto top = queue.top();
+			queue.pop();
+			size_t node = top.node;
+			size_t group = top.group;
+			double score = top.score;
+			if (currentGroup.count(node) == 1) continue;
+			if (scoreToGroup[group][node] < score - 0.01) continue;
+			if (score < groupCutoff) continue;
+			if (group == 0)
+			{
+				group = scoreToGroup.size();
+				scoreToGroup.emplace_back(scoreToGroup[0]);
+			}
+			currentGroup[node] = group;
+			for (auto edge : overlapsPerRead[node])
+			{
+				checkedEdges.insert(edge);
+				size_t other = alns[edge].leftPath;
+				if (other == node) other = alns[edge].rightPath;
+				// if (nodes.count(node) == 0 && nodes.count(other) == 0) continue;
+				if (currentGroup.count(other) == 1) continue;
+				//twice because loop decrements it once
+				scoreToGroup[group][other] += matchScore * (double)alns[edge].matches + mismatchScore * (double)alns[edge].mismatches;
+				scoreToGroup[group][other] += matchScore * (double)alns[edge].matches + mismatchScore * (double)alns[edge].mismatches;
+				for (size_t i = 0; i < scoreToGroup.size(); i++)
+				{
+					scoreToGroup[i][other] -= matchScore * (double)alns[edge].matches + mismatchScore * (double)alns[edge].mismatches;
+					queue.emplace(other, i, scoreToGroup[i][other]);
+				}
+			}
+		}
+		for (auto pair : currentGroup)
+		{
+			size_t node = pair.first;
+			size_t group = pair.second;
+			for (auto edge : overlapsPerRead[node])
+			{
+				size_t other = alns[edge].leftPath;
+				if (other == node) other = alns[edge].rightPath;
+				if (currentGroup.count(other) == 1 && currentGroup.at(other) != group)
+				{
+					forbiddenOverlaps.insert(alns[edge].alignmentID);
+				}
+			}
+		}
+	}
+	std::cerr << nodes.size() << " " << (forbiddenOverlaps.size() - oldForbiddenSize) << std::endl;
+}
+
+bool isAllowedToMerge(std::vector<size_t>& parent, const std::vector<size_t>& left, const std::vector<size_t>& right, const std::unordered_map<size_t, std::unordered_set<size_t>>& forbiddenMerges, const Alignment& aln, const std::vector<std::vector<size_t>>& pathToNode)
+{
+	for (auto pair : aln.alignedPairs)
+	{
+		auto leftp = find(pathToNode[aln.leftPath][pair.leftIndex], parent);
+		auto rightp = find(pathToNode[aln.rightPath][pair.rightIndex], parent);
+		if (forbiddenMerges.count(leftp) == 0) continue;
+		if (forbiddenMerges.at(leftp).count(rightp) == 1) return false;
+	}
+	return true;
+}
+
+void merge(std::vector<size_t>& parent, std::vector<size_t>& left, std::vector<size_t>& right, std::unordered_map<size_t, std::unordered_set<size_t>>& forbiddenMerges, const Alignment& aln, const std::vector<std::vector<size_t>>& pathToNode)
+{
+	for (auto pair : aln.alignedPairs)
+	{
+		auto leftNode = pathToNode[aln.leftPath][pair.leftIndex];
+		auto rightNode = pathToNode[aln.rightPath][pair.rightIndex];
+		auto leftp = find(leftNode, parent);
+		auto rightp = find(rightNode, parent);
+		if (leftp == rightp) continue;
+		parent[rightp] = leftp;
+		size_t leftRight = right[leftp];
+		size_t rightRight = right[rightp];
+		left[rightRight] = leftp;
+		right[leftp] = rightRight;
+		left[leftRight] = rightp;
+		right[rightp] = leftRight;
+		if (forbiddenMerges.count(rightp) == 1)
+		{
+			size_t leftForbidden = rightp;
+			for (auto rightForbidden : forbiddenMerges.at(rightp))
+			{
+				forbiddenMerges[find(leftForbidden, parent)].insert(find(rightForbidden, parent));
+				forbiddenMerges[find(rightForbidden, parent)].insert(find(leftForbidden, parent));
+			}
+		}
+	}
+}
+
+std::unordered_set<size_t> pickNonForbiddenMergingAlns(const std::vector<Path>& paths, const std::string& alnFile, double zeroIdentity, double groupCutoff)
+{
+	double matchScore = (1.0 - zeroIdentity);
+	double mismatchScore = - zeroIdentity;
 	std::vector<Alignment> alns;
-	std::vector<bool> picked;
-	StreamAlignments(alnFile, [&alns, &initialPick](const Alignment& aln){
-		if (initialPick.count(aln.alignmentID) == 0) return;
-		alns.emplace_back(aln);
-	});
-	std::cerr << alns.size() << " overlaps" << std::endl;
-	size_t nodeCount = 0;
-	picked.resize(alns.size(), false);
-	std::vector<std::vector<size_t>> nodeNum;
-	nodeNum.resize(paths.size());
+	std::vector<std::vector<size_t>> pathToNode;
+	std::vector<std::unordered_map<size_t, std::vector<size_t>>> nodesInPath;
+	size_t nextNodeId = 0;
 	for (size_t i = 0; i < paths.size(); i++)
 	{
-		nodeNum[i].resize(paths[i].position.size());
+		pathToNode.emplace_back();
+		nodesInPath.emplace_back();
 		for (size_t j = 0; j < paths[i].position.size(); j++)
 		{
-			nodeNum[i][j] = nodeCount;
-			nodeCount++;
+			pathToNode[i].emplace_back(nextNodeId);
+			nodesInPath[i][paths[i].position[j].id].emplace_back(nextNodeId);
+			nextNodeId += 1;
 		}
 	}
-	std::cerr << nodeCount << " nodes" << std::endl;
-	std::vector<size_t> parent;
-	std::vector<size_t> componentSize;
-	componentSize.resize(nodeCount, 1);
-	parent.resize(nodeCount, 0);
-	for (size_t i = 0; i < nodeCount; i++)
-	{
-		parent[i] = i;
-	}
-	std::vector<size_t> worstAlignments;
-	worstAlignments.reserve(alns.size());
-	for (size_t i = 0; i < alns.size(); i++)
-	{
-		worstAlignments.push_back(i);
-	}
-	std::sort(worstAlignments.begin(), worstAlignments.end(), [&alns](size_t left, size_t right) { return alns[left].alignmentLength * alns[left].alignmentIdentity < alns[right].alignmentLength * alns[right].alignmentIdentity; });
-	std::cerr << "allow from best to worst" << std::endl;
-	size_t allowedCount = 0;
-	for (size_t i = worstAlignments.size()-1; i < worstAlignments.size(); i--)
-	{
-		size_t aln = worstAlignments[i];
-		assert(!picked[aln]);
-		bool allowed = maybeAllow(aln, parent, componentSize, picked, alns, nodeNum, coverageDifferenceCutoff);
-		if (allowed) std::cerr << "!"; else std::cerr << ".";
-		if (allowed) allowedCount += 1;
-	}
-	std::cerr << allowedCount << " allowed overlaps" << std::endl;
-	std::unordered_set<size_t> result;
-	for (size_t i = 0; i < alns.size(); i++)
-	{
-		if (!picked[i]) continue;
-		size_t key = alns[i].alignmentID;
-		assert(result.count(key) == 0);
-		result.insert(key);
-	}
-	std::cerr << result.size() << " allowed overlaps" << std::endl;
-	assert(result.size() == allowedCount);
-	return result;
-}
-
-void addForbiddenOverlaps(std::unordered_set<size_t>& forbiddenOverlaps, const std::unordered_set<size_t>& nodes, const std::unordered_set<size_t>& conflictEdges, const std::vector<Alignment>& alns)
-{
-	
-}
-
-std::unordered_set<size_t> pickGroupAlignments(const std::vector<Path>& paths, const std::string& alnFile, double zeroIdentity, double groupCutoff)
-{
-	double matchScore = (1.0 - zeroIdentity) / zeroIdentity;
-	double mismatchScore = zeroIdentity / (1.0 / zeroIdentity);
-	std::vector<Alignment> alns;
-	std::unordered_set<size_t> conflictEdges;
-	StreamAlignments(alnFile, [&alns, &conflictEdges, matchScore, mismatchScore](const Alignment& aln){
+	std::unordered_map<size_t, std::unordered_set<size_t>> forbiddenMerges;
+	size_t numForbiddenMerges = 0;
+	StreamAlignments(alnFile, [&alns, &forbiddenMerges, &nodesInPath, &paths, &pathToNode, &numForbiddenMerges, matchScore, mismatchScore](Alignment& aln){
 		assert(aln.alignmentID == alns.size());
-		alns.emplace_back(aln);
-		decltype(aln.alignedPairs) tmp;
-		std::swap(tmp, alns.back().alignedPairs);
-		if (aln.matches * matchScore + aln.mismatches * mismatchScore < 0) conflictEdges.insert(aln.alignmentID);
+		assert(aln.leftPath < pathToNode.size());
+		assert(aln.rightPath < pathToNode.size());
+		if (aln.matches * matchScore + aln.mismatches * mismatchScore < 0)
+		{
+			for (size_t i = 0; i < paths[aln.leftPath].position.size(); i++)
+			{
+				auto node = paths[aln.leftPath].position[i].id;
+				size_t left = pathToNode[aln.leftPath][i];
+				if (nodesInPath[aln.rightPath].count(node) == 0) continue;
+				for (auto right : nodesInPath[aln.rightPath][node])
+				{
+					forbiddenMerges[left].insert(right);
+					forbiddenMerges[right].insert(left);
+					numForbiddenMerges += 1;
+				}
+			}
+		}
+		alns.emplace_back(std::move(aln));
 	});
 	std::cerr << alns.size() << " raw overlaps" << std::endl;
-	std::unordered_map<size_t, size_t> conflictGroup;
-	for (auto edge : conflictEdges)
+	std::sort(alns.begin(), alns.end(), [matchScore, mismatchScore](const Alignment& left, const Alignment& right) { return left.matches * matchScore + left.mismatches * mismatchScore < right.matches * matchScore + right.mismatches * mismatchScore; });
+	std::cerr << numForbiddenMerges << " forbidden merges" << std::endl;
+	std::vector<size_t> parent;
+	std::vector<size_t> left;
+	std::vector<size_t> right;
+	parent.reserve(nextNodeId);
+	left.reserve(nextNodeId);
+	right.reserve(nextNodeId);
+	for (size_t i = 0; i < nextNodeId; i++)
 	{
-		set(conflictGroup, edge.leftPath, edge.rightPath);
-	}
-	std::unordered_map<size_t, size_t> groupIndex;
-	std::vector<std::unordered_set<size_t>> conflictGroups;
-	for (auto edge : conflictEdges)
-	{
-		if (groupIndex.count(find(conflictGroup, edge.leftIndex)) == 0)
-		{
-			groupIndex[find(conflictGroup, edge.leftIndex)] = conflictGroups.size();
-			conflictGroups.emplace_back();
-		}
-		conflictGroups[groupIndex[find(conflictGroup, edge.leftIndex)]].insert(edge.leftPath);
-		conflictGroups[groupIndex[find(conflictGroup, edge.leftIndex)]].insert(edge.rightPath);
+		parent.push_back(i);
+		left.push_back(i);
+		right.push_back(i);
 	}
 	std::unordered_set<size_t> forbiddenOverlaps;
-	for (auto group : conflictGroups)
+	for (size_t i = alns.size()-1; i < alns.size(); i--)
 	{
-		addForbiddenOverlaps(forbiddenOverlaps, group, conflictEdges, alns);
+		const Alignment& aln = alns[i];
+		if (matchScore * aln.matches + mismatchScore * aln.mismatches < groupCutoff)
+		{
+			forbiddenOverlaps.insert(aln.alignmentID);
+			continue;
+		}
+		if (!isAllowedToMerge(parent, left, right, forbiddenMerges, aln, pathToNode))
+		{
+			forbiddenOverlaps.insert(aln.alignmentID);
+			continue;
+		}
+		merge(parent, left, right, forbiddenMerges, aln, pathToNode);
 	}
-	std::cerr << forbiddenOverlaps.size() << " forbidden overlaps";
+	std::cerr << forbiddenOverlaps.size() << " forbidden overlaps" << std::endl;
 	std::unordered_set<size_t> result;
 	for (size_t i = 0; i < alns.size(); i++)
 	{
 		if (forbiddenOverlaps.count(i) == 1) continue;
 		result.insert(i);
 	}
-	std::cerr << result.size() << " allowed overlaps";
+	std::cerr << result.size() << " allowed overlaps" << std::endl;
 	return result;
 }
 
-std::unordered_set<size_t> pickLongestPerRead(const std::vector<Path>& paths, std::string alnFile, size_t maxNum)
-{
-	std::vector<Alignment> alns;
-	StreamAlignments(alnFile, [&alns](const Alignment& aln){
-		alns.emplace_back(aln);
-		decltype(aln.alignedPairs) tmp;
-		std::swap(tmp, alns.back().alignedPairs);
-	});
-	std::cerr << alns.size() << " raw overlaps" << std::endl;
-	std::vector<std::vector<size_t>> leftAlnsPerRead;
-	std::vector<std::vector<size_t>> rightAlnsPerRead;
-	std::vector<int> picked;
-	picked.resize(alns.size(), 0);
-	leftAlnsPerRead.resize(paths.size());
-	rightAlnsPerRead.resize(paths.size());
-	for (size_t i = 0; i < alns.size(); i++)
-	{
-		assert(alns[i].leftPath < paths.size());
-		assert(alns[i].rightPath < paths.size());
-		assert(alns[i].leftEnd < paths[alns[i].leftPath].position.size());
-		assert(alns[i].rightEnd < paths[alns[i].rightPath].position.size());
-		if (alns[i].leftStart == 0) leftAlnsPerRead[alns[i].leftPath].push_back(i);
-		if (alns[i].leftEnd == paths[alns[i].leftPath].position.size()-1) rightAlnsPerRead[alns[i].leftPath].push_back(i);
-		if (alns[i].rightStart == 0) leftAlnsPerRead[alns[i].rightPath].push_back(i);
-		if (alns[i].rightEnd == paths[alns[i].rightPath].position.size()-1) rightAlnsPerRead[alns[i].rightPath].push_back(i);
-	}
-	for (size_t i = 0; i < leftAlnsPerRead.size(); i++)
-	{
-		std::sort(leftAlnsPerRead[i].begin(), leftAlnsPerRead[i].end(), AlignmentMatchComparerLT { alns });
-		std::sort(rightAlnsPerRead[i].begin(), rightAlnsPerRead[i].end(), AlignmentMatchComparerLT { alns });
-		std::set<size_t> pickedHere;
-		for (size_t j = leftAlnsPerRead[i].size() > maxNum ? (leftAlnsPerRead[i].size() - maxNum) : 0; j < leftAlnsPerRead[i].size(); j++)
-		{
-			pickedHere.insert(leftAlnsPerRead[i][j]);
-		}
-		for (size_t j = rightAlnsPerRead[i].size() > maxNum ? (rightAlnsPerRead[i].size() - maxNum) : 0; j < rightAlnsPerRead[i].size(); j++)
-		{
-			pickedHere.insert(rightAlnsPerRead[i][j]);
-		}
-		for (auto index : pickedHere)
-		{
-			picked[index] += 1;
-		}
-		std::sort(leftAlnsPerRead[i].begin(), leftAlnsPerRead[i].end(), AlignmentQualityComparerLT { alns });
-		std::sort(rightAlnsPerRead[i].begin(), rightAlnsPerRead[i].end(), AlignmentQualityComparerLT { alns });
-		pickedHere.clear();
-		for (size_t j = leftAlnsPerRead[i].size() > maxNum ? (leftAlnsPerRead[i].size() - maxNum) : 0; j < leftAlnsPerRead[i].size(); j++)
-		{
-			pickedHere.insert(leftAlnsPerRead[i][j]);
-		}
-		for (size_t j = rightAlnsPerRead[i].size() > maxNum ? (rightAlnsPerRead[i].size() - maxNum) : 0; j < rightAlnsPerRead[i].size(); j++)
-		{
-			pickedHere.insert(rightAlnsPerRead[i][j]);
-		}
-		for (auto index : pickedHere)
-		{
-			picked[index] += 1;
-		}
-	}
-	std::unordered_set<size_t> result;
-	for (size_t i = 0; i < alns.size(); i++)
-	{
-		assert(picked[i] >= 0);
-		assert(picked[i] <= 4);
-		if (picked[i] == 4)
-		{
-			assert(result.count(alns[i].alignmentID) == 0);
-			result.emplace(alns[i].alignmentID);
-		}
-	}
-	std::cerr << result.size() << " alignments after picking longest" << std::endl;
-	return result;
-}
+// std::unordered_set<size_t> pickLongestPerRead(const std::vector<Path>& paths, std::string alnFile, size_t maxNum)
+// {
+// 	std::vector<Alignment> alns;
+// 	StreamAlignments(alnFile, [&alns](const Alignment& aln){
+// 		alns.emplace_back(aln);
+// 		decltype(aln.alignedPairs) tmp;
+// 		std::swap(tmp, alns.back().alignedPairs);
+// 	});
+// 	std::cerr << alns.size() << " raw overlaps" << std::endl;
+// 	std::vector<std::vector<size_t>> leftAlnsPerRead;
+// 	std::vector<std::vector<size_t>> rightAlnsPerRead;
+// 	std::vector<int> picked;
+// 	picked.resize(alns.size(), 0);
+// 	leftAlnsPerRead.resize(paths.size());
+// 	rightAlnsPerRead.resize(paths.size());
+// 	for (size_t i = 0; i < alns.size(); i++)
+// 	{
+// 		assert(alns[i].leftPath < paths.size());
+// 		assert(alns[i].rightPath < paths.size());
+// 		assert(alns[i].leftEnd < paths[alns[i].leftPath].position.size());
+// 		assert(alns[i].rightEnd < paths[alns[i].rightPath].position.size());
+// 		if (alns[i].leftStart == 0) leftAlnsPerRead[alns[i].leftPath].push_back(i);
+// 		if (alns[i].leftEnd == paths[alns[i].leftPath].position.size()-1) rightAlnsPerRead[alns[i].leftPath].push_back(i);
+// 		if (alns[i].rightStart == 0) leftAlnsPerRead[alns[i].rightPath].push_back(i);
+// 		if (alns[i].rightEnd == paths[alns[i].rightPath].position.size()-1) rightAlnsPerRead[alns[i].rightPath].push_back(i);
+// 	}
+// 	for (size_t i = 0; i < leftAlnsPerRead.size(); i++)
+// 	{
+// 		std::sort(leftAlnsPerRead[i].begin(), leftAlnsPerRead[i].end(), AlignmentMatchComparerLT { alns });
+// 		std::sort(rightAlnsPerRead[i].begin(), rightAlnsPerRead[i].end(), AlignmentMatchComparerLT { alns });
+// 		std::set<size_t> pickedHere;
+// 		for (size_t j = leftAlnsPerRead[i].size() > maxNum ? (leftAlnsPerRead[i].size() - maxNum) : 0; j < leftAlnsPerRead[i].size(); j++)
+// 		{
+// 			pickedHere.insert(leftAlnsPerRead[i][j]);
+// 		}
+// 		for (size_t j = rightAlnsPerRead[i].size() > maxNum ? (rightAlnsPerRead[i].size() - maxNum) : 0; j < rightAlnsPerRead[i].size(); j++)
+// 		{
+// 			pickedHere.insert(rightAlnsPerRead[i][j]);
+// 		}
+// 		for (auto index : pickedHere)
+// 		{
+// 			picked[index] += 1;
+// 		}
+// 		std::sort(leftAlnsPerRead[i].begin(), leftAlnsPerRead[i].end(), AlignmentQualityComparerLT { alns });
+// 		std::sort(rightAlnsPerRead[i].begin(), rightAlnsPerRead[i].end(), AlignmentQualityComparerLT { alns });
+// 		pickedHere.clear();
+// 		for (size_t j = leftAlnsPerRead[i].size() > maxNum ? (leftAlnsPerRead[i].size() - maxNum) : 0; j < leftAlnsPerRead[i].size(); j++)
+// 		{
+// 			pickedHere.insert(leftAlnsPerRead[i][j]);
+// 		}
+// 		for (size_t j = rightAlnsPerRead[i].size() > maxNum ? (rightAlnsPerRead[i].size() - maxNum) : 0; j < rightAlnsPerRead[i].size(); j++)
+// 		{
+// 			pickedHere.insert(rightAlnsPerRead[i][j]);
+// 		}
+// 		for (auto index : pickedHere)
+// 		{
+// 			picked[index] += 1;
+// 		}
+// 	}
+// 	std::unordered_set<size_t> result;
+// 	for (size_t i = 0; i < alns.size(); i++)
+// 	{
+// 		assert(picked[i] >= 0);
+// 		assert(picked[i] <= 4);
+// 		if (picked[i] == 4)
+// 		{
+// 			assert(result.count(alns[i].alignmentID) == 0);
+// 			result.emplace(alns[i].alignmentID);
+// 		}
+// 	}
+// 	std::cerr << result.size() << " alignments after picking longest" << std::endl;
+// 	return result;
+// }
 
 DoublestrandedTransitiveClosureMapping removeOutsideCoverageClosures(const DoublestrandedTransitiveClosureMapping& closures, int minCoverage, int maxCoverage)
 {
@@ -1011,9 +1208,9 @@ int main(int argc, char** argv)
 	std::string inputOverlaps { argv[3] };
 	std::string outputGraph { argv[4] };
 	std::string outputPaths { argv[5] };
-	int initialMaxPick = std::stoi(argv[6]);
-	double zeroIdentity = std::stod(argv[7]);
-	double groupCutoff = std::stod(argv[8]);
+	// int initialMaxPick = std::stoi(argv[6]);
+	double zeroIdentity = std::stod(argv[6]);
+	double groupCutoff = std::stod(argv[7]);
 	// int coverageDifferenceCutoff = std::stoi(argv[7]);
 
 	std::cerr << "load graph" << std::endl;
@@ -1026,8 +1223,8 @@ int main(int argc, char** argv)
 		paths = loadAlignmentsAsPaths(inputAlns, 1000, nodeSizes);
 		std::cerr << paths.size() << " paths after filtering by length" << std::endl;
 	}
-	std::cerr << "pick-group alignments" << std::endl;
-	auto pickedAlns = pickGroupAlignments(paths, inputOverlaps, zeroIdentity, groupCutoff)
+	std::cerr << "pick nonforbidden merging alignments" << std::endl;
+	auto pickedAlns = pickNonForbiddenMergingAlns(paths, inputOverlaps, zeroIdentity, groupCutoff);
 	// std::cerr << "pick longest alignments" << std::endl;
 	// auto longestAlns = pickLongestPerRead(paths, inputOverlaps, initialMaxPick);
 	// std::cerr << "pick-add alignments" << std::endl;
@@ -1038,8 +1235,8 @@ int main(int argc, char** argv)
 	{
 		decltype(pickedAlns) tmp;
 		std::swap(pickedAlns, tmp);
-		decltype(longestAlns) tmp2;
-		std::swap(longestAlns, tmp2);
+		// decltype(longestAlns) tmp2;
+		// std::swap(longestAlns, tmp2);
 	}
 	std::cerr << "merge double strands" << std::endl;
 	auto doubleStrandedClosures = mergeDoublestrandClosures(paths, transitiveClosures);

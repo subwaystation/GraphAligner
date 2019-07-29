@@ -118,7 +118,7 @@ rule initial_assembly:
 		stdout = TMPDIR + "assemble_stdout.txt",
 		stderr = TMPDIR + "assemble_stderr.txt"
 	shell:
-		"/usr/bin/time -v {ALIGNERBINDIR}AssembleByAlignment {input.graph} {input.alignments} {input.overlaps} {output.assembly} {output.translatedreads} {INITIALOVERLAPCOUNT} {REPEATCOVERAGECUTOFF} 1> {log.stdout} 2> {log.stderr}"
+		"/usr/bin/time -v {ALIGNERBINDIR}AssembleByAlignment {input.graph} {input.alignments} {input.overlaps} {output.assembly} {output.translatedreads} {MINOVERLAPIDENTITY} {MINOVERLAPLENGTH} 1> {log.stdout} 2> {log.stderr}"
 
 rule unitigify:
 	input: TMPDIR + "{graph}.gfa"

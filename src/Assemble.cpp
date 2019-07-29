@@ -18,48 +18,48 @@ Path Path::Reverse() const
 // 	return left.alignmentLength * left.alignmentIdentity < right.alignmentLength * right.alignmentIdentity;
 // }
 
-AlignmentMatchComparerLT::AlignmentMatchComparerLT(const std::vector<Alignment>& paths) :
-paths(&paths)
-{}
+// AlignmentMatchComparerLT::AlignmentMatchComparerLT(const std::vector<Alignment>& paths) :
+// paths(&paths)
+// {}
 
-AlignmentMatchComparerLT::AlignmentMatchComparerLT() :
-paths(nullptr)
-{}
+// AlignmentMatchComparerLT::AlignmentMatchComparerLT() :
+// paths(nullptr)
+// {}
 
-bool AlignmentMatchComparerLT::operator()(const Alignment& left, const Alignment& right) const
-{
-	return AlignmentMatchCompareLT(left, right);
-}
+// bool AlignmentMatchComparerLT::operator()(const Alignment& left, const Alignment& right) const
+// {
+// 	return AlignmentMatchCompareLT(left, right);
+// }
 
-bool AlignmentMatchComparerLT::operator()(size_t left, size_t right) const
-{
-	assert(paths != nullptr);
-	return AlignmentMatchCompareLT(paths->at(left), paths->at(right));
-}
+// bool AlignmentMatchComparerLT::operator()(size_t left, size_t right) const
+// {
+// 	assert(paths != nullptr);
+// 	return AlignmentMatchCompareLT(paths->at(left), paths->at(right));
+// }
 
 // bool AlignmentQualityCompareLT(const Alignment& left, const Alignment& right)
 // {
 // 	return left.alignmentIdentity < right.alignmentIdentity;
 // }
 
-AlignmentQualityComparerLT::AlignmentQualityComparerLT(const std::vector<Alignment>& paths) :
-paths(&paths)
-{}
+// AlignmentQualityComparerLT::AlignmentQualityComparerLT(const std::vector<Alignment>& paths) :
+// paths(&paths)
+// {}
 
-AlignmentQualityComparerLT::AlignmentQualityComparerLT() :
-paths(nullptr)
-{}
+// AlignmentQualityComparerLT::AlignmentQualityComparerLT() :
+// paths(nullptr)
+// {}
 
-bool AlignmentQualityComparerLT::operator()(const Alignment& left, const Alignment& right) const
-{
-	return AlignmentQualityCompareLT(left, right);
-}
+// bool AlignmentQualityComparerLT::operator()(const Alignment& left, const Alignment& right) const
+// {
+// 	return AlignmentQualityCompareLT(left, right);
+// }
 
-bool AlignmentQualityComparerLT::operator()(size_t left, size_t right) const
-{
-	assert(paths != nullptr);
-	return AlignmentQualityCompareLT(paths->at(left), paths->at(right));
-}
+// bool AlignmentQualityComparerLT::operator()(size_t left, size_t right) const
+// {
+// 	assert(paths != nullptr);
+// 	return AlignmentQualityCompareLT(paths->at(left), paths->at(right));
+// }
 
 bool operator<(const std::pair<size_t, NodePos>& left, const std::pair<size_t, NodePos>& right)
 {
@@ -87,6 +87,7 @@ void WriteAlignment(std::ofstream& file, const Alignment& aln)
 		write(file, (char)aln.alignedPairs[i].leftReverse);
 		write(file, (char)aln.alignedPairs[i].rightReverse);
 	}
+	file << std::endl;
 }
 
 std::vector<Path> loadAlignmentsAsPaths(std::string fileName, size_t minLen, const std::unordered_map<int, size_t>& nodeSizes)

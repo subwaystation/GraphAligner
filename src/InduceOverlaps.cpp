@@ -270,7 +270,7 @@ void induceOverlaps(const std::vector<Path>& paths, const std::unordered_map<int
 						if (i == j) continue;
 						Alignment fwAln;
 						fwAln = approxAlign(paths[j], paths[i], nodeSizes, cumulativePrefixLengths[j], cumulativePrefixLengths[i], occurrences, j, i, mismatchPenalty, bandwidth);
-						if (fwAln.alignmentLength >= 0)
+						if (fwAln.alignmentLength > 0)
 						{
 							for (size_t k = 0; k < fwAln.alignedPairs.size(); k++)
 							{
@@ -291,7 +291,7 @@ void induceOverlaps(const std::vector<Path>& paths, const std::unordered_map<int
 						if (i == j) continue;
 						Alignment bwAln;
 						bwAln = approxAlign(paths[j], reversePath, nodeSizes, cumulativePrefixLengths[j], reverseCumulativePrefixLengths, reverseOccurrences, j, i, mismatchPenalty, bandwidth);
-						if (bwAln.alignmentLength >= 0)
+						if (bwAln.alignmentLength > 0)
 						{
 							bwAln.rightStart = paths[i].position.size() - 1 - bwAln.rightStart;
 							bwAln.rightEnd = paths[i].position.size() - 1 - bwAln.rightEnd;

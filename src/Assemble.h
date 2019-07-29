@@ -14,6 +14,11 @@ struct Path
 
 struct AlignmentMatch
 {
+	AlignmentMatch() = default;
+	AlignmentMatch(const AlignmentMatch&) = default;
+	AlignmentMatch(AlignmentMatch&&) = default;
+	AlignmentMatch& operator=(const AlignmentMatch&) = default;
+	AlignmentMatch& operator=(AlignmentMatch&&) = default;
 	size_t leftIndex;
 	size_t rightIndex;
 	bool leftReverse;
@@ -40,14 +45,16 @@ template <typename T>
 T read(std::ifstream& file)
 {
 	T result;
-	file.read((char*)&result, sizeof(T));
+	file >> result;
+	// file.read((char*)&result, sizeof(T));
 	return result;
 }
 
 template <typename T>
 void write(std::ofstream& file, T val)
 {
-	file.write((char*)&val, sizeof(T));
+	file << val << " ";
+	// file.write((char*)&val, sizeof(T));
 }
 
 void WriteAlignment(std::ofstream& file, const Alignment& aln);
@@ -84,30 +91,30 @@ void StreamAlignments(std::string filename, F f)
 	}
 }
 
-bool AlignmentMatchCompareLT(const Alignment& left, const Alignment& right);
+// bool AlignmentMatchCompareLT(const Alignment& left, const Alignment& right);
 // bool AlignmentIdentityCompareLT(const Alignment& left, const Alignment& right);
 
-struct AlignmentMatchComparerLT
-{
-public:
-	AlignmentMatchComparerLT(const std::vector<Alignment>& paths);
-	AlignmentMatchComparerLT();
-	bool operator()(const Alignment& left, const Alignment& right) const;
-	bool operator()(size_t left, size_t right) const;
-private:
-	const std::vector<Alignment>* const paths;
-};
+// struct AlignmentMatchComparerLT
+// {
+// public:
+// 	AlignmentMatchComparerLT(const std::vector<Alignment>& paths);
+// 	AlignmentMatchComparerLT();
+// 	bool operator()(const Alignment& left, const Alignment& right) const;
+// 	bool operator()(size_t left, size_t right) const;
+// private:
+// 	const std::vector<Alignment>* const paths;
+// };
 
-struct AlignmentQualityComparerLT
-{
-public:
-	AlignmentQualityComparerLT(const std::vector<Alignment>& paths);
-	AlignmentQualityComparerLT();
-	bool operator()(const Alignment& left, const Alignment& right) const;
-	bool operator()(size_t left, size_t right) const;
-private:
-	const std::vector<Alignment>* const paths;
-};
+// struct AlignmentQualityComparerLT
+// {
+// public:
+// 	AlignmentQualityComparerLT(const std::vector<Alignment>& paths);
+// 	AlignmentQualityComparerLT();
+// 	bool operator()(const Alignment& left, const Alignment& right) const;
+// 	bool operator()(size_t left, size_t right) const;
+// private:
+// 	const std::vector<Alignment>* const paths;
+// };
 
 std::vector<Path> loadAlignmentsAsPaths(std::string fileName, size_t minLen, const std::unordered_map<int, size_t>& nodeSizes);
 std::unordered_map<int, size_t> getNodeSizes(const GfaGraph& graph);
