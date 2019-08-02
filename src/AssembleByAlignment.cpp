@@ -716,16 +716,16 @@ std::unordered_set<size_t> pickNonForbiddenMergingAlns(const std::vector<Path>& 
 				}
 				for (auto node : nodesInPath[aln.rightPath].at(pair.first))
 				{
-					forbiddenMerges[node].insert(nextForbiddenMerge + 1);
+					forbiddenMerges[node].insert(nextForbiddenMerge);
 				}
-				nextForbiddenMerge += 2;
+				nextForbiddenMerge += 1;
 			}
 		}
 		alns.emplace_back(std::move(aln));
 	});
 	std::cerr << alns.size() << " raw overlaps" << std::endl;
 	std::sort(alns.begin(), alns.end(), [matchScore, mismatchScore](const Alignment& left, const Alignment& right) { return left.matches * matchScore + left.mismatches * mismatchScore < right.matches * matchScore + right.mismatches * mismatchScore; });
-	std::cerr << (nextForbiddenMerge / 2) << " forbidden mergesets" << std::endl;
+	std::cerr << (nextForbiddenMerge) << " forbidden mergesets" << std::endl;
 	std::vector<size_t> parent;
 	std::vector<size_t> left;
 	std::vector<size_t> right;
@@ -1246,16 +1246,16 @@ int main(int argc, char** argv)
 		std::swap(transitiveClosures, tmp);
 	}
 	std::cerr << "remove wrong coverage closures" << std::endl;
-	doubleStrandedClosures = removeOutsideCoverageClosures(doubleStrandedClosures, 3, 10000);
+	doubleStrandedClosures = removeOutsideCoverageClosures(doubleStrandedClosures, 2, 10000);
 	std::cerr << "get closure edges" << std::endl;
 	auto closureEdges = getClosureEdges(doubleStrandedClosures, paths);
 	std::cerr << "bridge tips" << std::endl;
-	std::tie(doubleStrandedClosures, closureEdges) = bridgeTips(doubleStrandedClosures, closureEdges, paths, 3);
+	std::tie(doubleStrandedClosures, closureEdges) = bridgeTips(doubleStrandedClosures, closureEdges, paths, 2);
 	// std::cerr << "insert middles" << std::endl;
 	// doubleStrandedClosures = insertMiddles(doubleStrandedClosures, paths);
 	std::cerr << "remove chimeric edges" << std::endl;
-	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 5, 0.2);
-	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 10, 0.1);
+	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 4, 0.2);
+	closureEdges = removeChimericEdges(doubleStrandedClosures, closureEdges, 8, 0.1);
 	std::cerr << "determine closure overlaps" << std::endl;
 	closureEdges = determineClosureOverlaps(paths, doubleStrandedClosures, closureEdges, graph);
 	std::cerr << "graphify" << std::endl;
