@@ -56,12 +56,10 @@ for n in graph.nodes:
 print("merge bubble nodes")
 
 for snarl in snarls:
-	prev = None
 	start_node = (snarl[0], snarl[1])
 	end_node = (snarl[2], snarl[3])
 	nodes = set()
 	visit_stack = [start_node]
-	trav_here = set()
 	while len(visit_stack) > 0:
 		pos = visit_stack.pop()
 		if pos[0] in nodes: continue
@@ -71,14 +69,9 @@ for snarl in snarls:
 		assert pos in graph.edges
 		for edge in graph.edges[pos]:
 			target = edge[0]
-			if (pos, target) in trav_here:
-				assert (reverse(target), reverse(pos)) in trav_here
-				continue
-			assert (reverse(target), reverse(pos)) not in trav_here
-			trav_here.add((pos, target))
-			trav_here.add((reverse(target), reverse(pos)))
+			trav_edges.add((pos, target))
+			trav_edges.add((reverse(target), reverse(pos)))
 			visit_stack.append(target)
-	trav_edges = trav_edges.union(trav_here)
 	assert len(nodes) > 0
 	for n in nodes:
 		assert n in graph.nodes
