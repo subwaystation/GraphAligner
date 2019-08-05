@@ -77,14 +77,17 @@ def collapse(start_node, end_node):
 		else:
 			assert False
 
+snarls = []
+
 with open(in_bubbles) as f:
-	snarls = json.load(f)
+	for l in f:
+		parts = l.strip().split('\t')
+		if len(parts) < 4: continue
+		snarls.append(((parts[0]), parts[1] == "+", (parts[2]), parts[3] == "+"))
 
 for snarl in snarls:
-	if "type" not in snarl: continue
-	if snarl["type"] not in ["ULTRABUBBLE"]: continue
-	start_node = (snarl["start"]["node_id"], not (("backward" in snarl["start"]) and snarl["start"]["backward"] == True))
-	end_node = (snarl["end"]["node_id"], not (("backward" in snarl["end"]) and snarl["end"]["backward"] == True))
+	start_node = (snarl[0], snarl[1])
+	end_node = (snarl[2], snarl[3])
 	if start_node[0] not in graph.nodes or end_node[0] not in graph.nodes: continue
 	collapse(start_node, end_node)
 

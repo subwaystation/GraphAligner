@@ -9,15 +9,25 @@ insnarls = sys.argv[2]
 outgraph = sys.argv[3]
 outchains = sys.argv[4]
 
+print("read graph")
+
 graph = Graph()
 graph.load(ingraph)
 graph.remove_nonexistent_edges()
 
+snarls = []
+
+print("read ultrabubbles")
+
 with open(insnarls) as f:
-	snarls = json.load(f)
+	for l in f:
+		parts = l.strip().split('\t')
+		if len(parts) < 4: continue
+		snarls.append(((parts[0]), parts[1] == "+", (parts[2]), parts[3] == "+"))
 
 trav_edges = set()
 parent = {}
+rank = {}
 
 def find(k1):
 	global parent
@@ -34,24 +44,30 @@ def merge(k1, k2):
 	global parent
 	p1 = find(k1)
 	p2 = find(k2)
+	if rank[p1] < rank[p2]:
+		(p1, p2) = (p2, p1)
 	parent[p2] = p1
+	if rank[p2] == rank[p1]: rank[p1] += 1
 
 for n in graph.nodes:
 	parent[n] = n
+	rank[n] = 0
+
+print("merge bubble nodes")
 
 for snarl in snarls:
-	if "type" not in snarl: continue
-	if snarl["type"] not in ["ULTRABUBBLE"]: continue
 	prev = None
-	start_node = (snarl["start"]["node_id"], not (("backward" in snarl["start"]) and snarl["start"]["backward"] == True))
-	end_node = (snarl["end"]["node_id"], not (("backward" in snarl["end"]) and snarl["end"]["backward"] == True))
-	nodes = []
+	start_node = (snarl[0], snarl[1])
+	end_node = (snarl[2], snarl[3])
+	nodes = set()
 	visit_stack = [start_node]
 	trav_here = set()
 	while len(visit_stack) > 0:
 		pos = visit_stack.pop()
-		nodes.append(pos[0])
+		if pos[0] in nodes: continue
+		nodes.add(pos[0])
 		if pos == end_node: continue
+		if pos not in graph.edges: print(pos)
 		assert pos in graph.edges
 		for edge in graph.edges[pos]:
 			target = edge[0]
@@ -65,11 +81,12 @@ for snarl in snarls:
 	trav_edges = trav_edges.union(trav_here)
 	assert len(nodes) > 0
 	for n in nodes:
-		assert nodes[0] in graph.nodes
 		assert n in graph.nodes
-		merge(nodes[0], n)
+		merge(start_node[0], n)
 
 chains = Graph()
+
+print("merge chains")
 
 for n in graph.nodes:
 	node = graph.nodes[n]
@@ -97,6 +114,8 @@ def add_end(n, pos):
 	assert n not in chain_end
 	chain_end[n] = pos
 
+print("add ends")
+
 for n in graph.nodes:
 	fwpos = (n, True)
 	bwpos = (n, False)
@@ -119,6 +138,8 @@ for n in graph.nodes:
 			assert edge_exists == ((bwpos, e[0]) in trav_edges)
 		if not edge_exists: add_end(find(n), bwpos)
 
+print("add circular ends")
+
 for c in chains.nodes:
 	if (c in chain_start) and (c in chain_end): continue
 	assert c not in chain_start
@@ -132,6 +153,8 @@ for c in chains.nodes:
 for c in chains.nodes:
 	assert c in chain_start
 	assert c in chain_end
+
+print("add chain edges")
 
 for e in graph.edges:
 	if e == chain_end[find(e[0])]:
@@ -148,6 +171,8 @@ for e in graph.edges:
 		else: assert False 
 		if fromchain not in chains.edges: chains.edges[fromchain] = set()
 		chains.edges[fromchain].add((tochain, target[1]))
+
+print("write")
 
 graph.write(outgraph)
 chains.write(outchains)

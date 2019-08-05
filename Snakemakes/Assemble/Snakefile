@@ -134,25 +134,25 @@ rule untip:
 
 rule find_bubbles:
 	input: TMPDIR + "{graph}.gfa"
-	output: temp(TMPDIR + "{graph}-snarls.json")
-	shell: "{ALIGNERSCRIPTDIR}find_ultrabubbles.py {input} | sed 's/$/,/g' | sed '1 s/^/[/g' | sed '$ s/,$/]/g' > {output}"
+	output: temp(TMPDIR + "{graph}-ultrabubbles.txt")
+	shell: "{ALIGNERSCRIPTDIR}find_ultrabubbles.py {input} > {output}"
 
 rule make_chains:
 	input:
 		graph = TMPDIR + "{graph}.gfa",
-		snarls = TMPDIR + "{graph}-snarls.json"
+		ultrabubbles = TMPDIR + "{graph}-ultrabubbles.txt"
 	output:
 		graph_withchains = temp(TMPDIR + "{graph}-withchains.gfa"),
 		chains = temp(TMPDIR + "{graph}-chains.gfa")
-	shell: "{ALIGNERSCRIPTDIR}make_chain_graph.py {input.graph} {input.snarls} {output.graph_withchains} {output.chains}"
+	shell: "{ALIGNERSCRIPTDIR}make_chain_graph.py {input.graph} {input.ultrabubbles} {output.graph_withchains} {output.chains}"
 
 rule collapse_graph:
 	input:
 		graph = TMPDIR + "{graph}-withchains.gfa",
-		snarls = TMPDIR + "{graph}-snarls.json"
+		ultrabubbles = TMPDIR + "{graph}-ultrabubbles.txt"
 	output:
 		graph_collapsed = temp(TMPDIR + "{graph}-collapsed.gfa")
-	shell: "{ALIGNERSCRIPTDIR}arbitrarily_collapse_bubbles.py {input.graph} {input.snarls} {output.graph_collapsed}"
+	shell: "{ALIGNERSCRIPTDIR}arbitrarily_collapse_bubbles.py {input.graph} {input.ultrabubbles} {output.graph_collapsed}"
 
 rule resolve_small_cycles:
 	input: TMPDIR + "{graph}.gfa",

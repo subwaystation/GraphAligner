@@ -58,19 +58,7 @@ def detect_bubble(s):
 for n in graph.nodes:
 	bubble = detect_bubble((n, True))
 	if bubble:
-		leftkey = '{"node_id":"' + str(bubble[0][0]) + '"'
-		if not bubble[0][1]: leftkey += ',"backward":true'
-		leftkey += '}'
-		rightkey = '{"node_id":"' + str(bubble[1][0]) + '"'
-		if not bubble[1][1]: rightkey += ',"backward":true'
-		rightkey += '}'
-		print('{"type":"ULTRABUBBLE","start":' + leftkey + ',"end":' + rightkey + '}')
+		print(str(bubble[0][0]) + "\t" + ("+" if bubble[0][1] else "-") + "\t" + str(bubble[1][0]) + "\t" + ("+" if bubble[1][1] else "-"))
 	bubble = detect_bubble((n, False))
 	if bubble:
-		leftkey = '{"node_id":"' + str(bubble[0][0]) + '"'
-		if not bubble[0][1]: leftkey += ',"backward":true'
-		leftkey += '}'
-		rightkey = '{"node_id":"' + str(bubble[1][0]) + '"'
-		if not bubble[1][1]: rightkey += ',"backward":true'
-		rightkey += '}'
-		print('{"type":"ULTRABUBBLE","start":' + leftkey + ',"end":' + rightkey + '}')
+		print(str(bubble[0][0]) + "\t" + ("+" if bubble[0][1] else "-") + "\t" + str(bubble[1][0]) + "\t" + ("+" if bubble[1][1] else "-"))
