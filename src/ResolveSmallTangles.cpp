@@ -356,7 +356,7 @@ bool canResolve(const std::vector<Subpath>& pathsPerComponent, const ResolvableC
 		std::cerr << "cannot resolve, zero paths" << std::endl;
 		return false;
 	}
-	if (totalSafeCrossing < pathsPerComponent.size() * 0.25)
+	if (totalSafeCrossing < pathsPerComponent.size() * 0.5)
 	{
 		std::cerr << "cannot resolve, too few total safe crossers (" << totalSafeCrossing << ", " << pathsPerComponent.size() << ")" << std::endl;
 		return false;
@@ -381,7 +381,7 @@ bool canResolve(const std::vector<Subpath>& pathsPerComponent, const ResolvableC
 			std::cerr << "cannot resolve, zero safe crossers for node " << pair.first;
 			return false;
 		}
-		if (safeCrossingPerSafe.at(pair.first) < pair.second * 0.25)
+		if (safeCrossingPerSafe.at(pair.first) < pair.second * 0.5)
 		{
 			std::cerr << "cannot resolve, too few safe crossers for node " << pair.first << " (" << totalSafeCrossing << ", " << pathsPerComponent.size() << ")" << std::endl;
 			return false;

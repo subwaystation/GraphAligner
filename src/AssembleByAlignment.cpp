@@ -705,27 +705,10 @@ std::unordered_set<size_t> pickNonForbiddenMergingAlns(const std::vector<Path>& 
 		assert(aln.alignmentID == alns.size());
 		assert(aln.leftPath < pathToNode.size());
 		assert(aln.rightPath < pathToNode.size());
-		if ((double)aln.matches * matchScore + (double)aln.mismatches * mismatchScore < -500)
-		{
-			for (auto pair : nodesInPath[aln.leftPath])
-			{
-				if (nodesInPath[aln.rightPath].count(pair.first) == 0) continue;
-				for (auto node : pair.second)
-				{
-					forbiddenMerges[node].insert(nextForbiddenMerge);
-				}
-				for (auto node : nodesInPath[aln.rightPath].at(pair.first))
-				{
-					forbiddenMerges[node].insert(nextForbiddenMerge);
-				}
-				nextForbiddenMerge += 1;
-			}
-		}
 		alns.emplace_back(std::move(aln));
 	});
 	std::cerr << alns.size() << " raw overlaps" << std::endl;
 	std::sort(alns.begin(), alns.end(), [matchScore, mismatchScore](const Alignment& left, const Alignment& right) { return left.matches * matchScore + left.mismatches * mismatchScore < right.matches * matchScore + right.mismatches * mismatchScore; });
-	std::cerr << (nextForbiddenMerge) << " forbidden mergesets" << std::endl;
 	std::vector<size_t> parent;
 	std::vector<size_t> left;
 	std::vector<size_t> right;
@@ -739,21 +722,56 @@ std::unordered_set<size_t> pickNonForbiddenMergingAlns(const std::vector<Path>& 
 		right.push_back(i);
 	}
 	std::unordered_set<size_t> forbiddenOverlaps;
-	for (size_t i = alns.size()-1; i < alns.size(); i--)
+	size_t nextForbidden = 0;
+	size_t nextAllowed = alns.size()-1;
+	while (nextAllowed > nextForbidden)
 	{
-		const Alignment& aln = alns[i];
-		if (matchScore * (double)aln.matches + mismatchScore * (double)aln.mismatches < 500)
+		double allowedScore = matchScore * (double)alns[nextAllowed].matches + mismatchScore * (double)alns[nextAllowed].mismatches;
+		double forbiddenScore = matchScore * (double)alns[nextForbidden].matches + mismatchScore * (double)alns[nextForbidden].mismatches;
+		if (forbiddenScore < -allowedScore)
 		{
-			forbiddenOverlaps.insert(aln.alignmentID);
-			continue;
+			if (forbiddenScore > -1000)
+			{
+				forbiddenOverlaps.insert(alns[nextForbidden].alignmentID);
+				nextForbidden += 1;
+				continue;
+			}
+			for (auto pair : nodesInPath[alns[nextForbidden].leftPath])
+			{
+				if (nodesInPath[alns[nextForbidden].rightPath].count(pair.first) == 0) continue;
+				for (auto node : pair.second)
+				{
+					forbiddenMerges[find(node, parent)].insert(nextForbiddenMerge);
+				}
+				for (auto node : nodesInPath[alns[nextForbidden].rightPath].at(pair.first))
+				{
+					forbiddenMerges[find(node, parent)].insert(nextForbiddenMerge);
+				}
+				nextForbiddenMerge += 1;
+			}
+			forbiddenOverlaps.insert(alns[nextForbidden].alignmentID);
+			nextForbidden += 1;
 		}
-		if (!isAllowedToMerge(parent, left, right, forbiddenMerges, aln, pathToNode))
+		else
 		{
-			forbiddenOverlaps.insert(aln.alignmentID);
-			continue;
+			if (allowedScore < 1000)
+			{
+				forbiddenOverlaps.insert(alns[nextAllowed].alignmentID);
+				nextAllowed -= 1;
+				continue;
+			}
+			if (!isAllowedToMerge(parent, left, right, forbiddenMerges, alns[nextAllowed], pathToNode))
+			{
+				forbiddenOverlaps.insert(alns[nextAllowed].alignmentID);
+				nextAllowed -= 1;
+				continue;
+			}
+			merge(parent, left, right, forbiddenMerges, alns[nextAllowed], pathToNode);
+			nextAllowed -= 1;
 		}
-		merge(parent, left, right, forbiddenMerges, aln, pathToNode);
 	}
+	assert(nextAllowed == nextForbidden);
+	forbiddenOverlaps.insert(alns[nextForbidden].alignmentID);
 	std::cerr << forbiddenOverlaps.size() << " forbidden overlaps" << std::endl;
 	std::unordered_set<size_t> result;
 	for (size_t i = 0; i < alns.size(); i++)
