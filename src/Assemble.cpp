@@ -96,8 +96,9 @@ std::vector<Path> loadAlignmentsAsPaths(std::string fileName, size_t minLen, con
 
 	{
 		std::ifstream file { fileName, std::ios::in | std::ios::binary };
-		std::function<void(vg::Alignment&)> lambda = [&alnsPerRead](vg::Alignment& g) {
+		std::function<void(vg::Alignment&)> lambda = [&alnsPerRead, minLen](vg::Alignment& g) {
 			std::vector<NodePos> thisAln;
+			if (g.sequence().size() < minLen) return;
 			for (int i = 0; i < g.path().mapping_size(); i++)
 			{
 				thisAln.emplace_back(g.path().mapping(i).position().node_id(), !g.path().mapping(i).position().is_reverse());
