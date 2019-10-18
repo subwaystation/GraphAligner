@@ -680,6 +680,59 @@ void merge(std::vector<size_t>& parent, std::vector<size_t>& left, std::vector<s
 	}
 }
 
+std::unordered_set<size_t> pickBestPerPosition(const std::vector<Path>& paths, const std::string& alnFile, double zeroIdentity, double groupCutoff)
+{
+	double matchScore = (1.0 - zeroIdentity);
+	double mismatchScore = - zeroIdentity;
+	std::vector<Alignment> alns;
+	StreamAlignments(alnFile, [&alns, matchScore, mismatchScore](Alignment& aln){
+		if (aln.alignmentLength < 1000) return;
+		if (aln.matches * matchScore + aln.mismatches * mismatchScore < 1000) return;
+		alns.emplace_back(std::move(aln));
+	});
+	std::sort(alns.begin(), alns.end(), [matchScore, mismatchScore](const Alignment& left, const Alignment& right) { return left.matches * matchScore + left.mismatches * mismatchScore < right.matches * matchScore + right.mismatches * mismatchScore; });
+	std::vector<std::vector<size_t>> alnsPerRead;
+	alnsPerRead.resize(paths.size());
+	for (size_t i = 0; i < alns.size(); i++)
+	{
+		alnsPerRead[alns[i].leftPath].push_back(i);
+		alnsPerRead[alns[i].rightPath].push_back(i);
+	}
+	std::unordered_set<size_t> allowedAlignments;
+	for (size_t readI = 0; readI < paths.size(); readI++)
+	{
+		std::vector<int> covered;
+		covered.resize(paths[readI].position.size(), 0);
+		std::reverse(alnsPerRead[readI].begin(), alnsPerRead[readI].end());
+		for (auto alnI : alnsPerRead[readI])
+		{
+			bool valid = false;
+			size_t startIndex = alns[alnI].leftStart;
+			size_t endIndex = alns[alnI].leftEnd;
+			if (alns[alnI].rightPath == readI)
+			{
+				startIndex = alns[alnI].rightStart;
+				endIndex = alns[alnI].rightEnd;
+			}
+			for (size_t i = startIndex; i <= endIndex; i++)
+			{
+				if (covered[i] < 5)
+				{
+					valid = true;
+					break;
+				}
+			}
+			if (valid)
+			{
+				for (size_t i = startIndex; i <= endIndex; i++) covered[i] += 1;
+				allowedAlignments.insert(alns[alnI].alignmentID);
+			}
+		}
+	}
+	std::cerr << allowedAlignments.size() << " allowed overlaps" << std::endl;
+	return allowedAlignments;
+}
+
 std::unordered_set<size_t> pickNonForbiddenMergingAlns(const std::vector<Path>& paths, const std::string& alnFile, double zeroIdentity, double groupCutoff)
 {
 	double matchScore = (1.0 - zeroIdentity);
@@ -782,6 +835,7 @@ std::unordered_set<size_t> pickNonForbiddenMergingAlns(const std::vector<Path>& 
 	std::cerr << result.size() << " allowed overlaps" << std::endl;
 	return result;
 }
+
 
 // std::unordered_set<size_t> pickLongestPerRead(const std::vector<Path>& paths, std::string alnFile, size_t maxNum)
 // {
@@ -1241,8 +1295,10 @@ int main(int argc, char** argv)
 		paths = loadAlignmentsAsPaths(inputAlns, 1000, nodeSizes);
 		std::cerr << paths.size() << " paths after filtering by length" << std::endl;
 	}
-	std::cerr << "pick nonforbidden merging alignments" << std::endl;
-	auto pickedAlns = pickNonForbiddenMergingAlns(paths, inputOverlaps, zeroIdentity, groupCutoff);
+	// std::cerr << "pick nonforbidden merging alignments" << std::endl;
+	// auto pickedAlns = pickNonForbiddenMergingAlns(paths, inputOverlaps, zeroIdentity, groupCutoff);
+	std::cerr << "pick best per position" << std::endl;
+	auto pickedAlns = pickBestPerPosition(paths, inputOverlaps, zeroIdentity, groupCutoff);
 	// std::cerr << "pick longest alignments" << std::endl;
 	// auto longestAlns = pickLongestPerRead(paths, inputOverlaps, initialMaxPick);
 	// std::cerr << "pick-add alignments" << std::endl;
