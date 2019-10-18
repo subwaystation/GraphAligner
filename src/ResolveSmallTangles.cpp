@@ -25,7 +25,7 @@ std::pair<NodePos, NodePos> canon(NodePos left, NodePos right)
 	return std::make_pair(right.Reverse(), left.Reverse());
 }
 
-std::unordered_set<int> getSafeChains(const GfaGraph& graph, size_t safeChainSize, size_t genomeSize)
+std::unordered_set<int> getSafeChains(const GfaGraph& graph, size_t safeChainSize, const std::unordered_map<size_t, size_t>& coveragePerNode, double averageCoverage)
 {
 	std::unordered_map<int, size_t> chainSize;
 	std::unordered_map<int, size_t> chainKmers;
@@ -36,20 +36,25 @@ std::unordered_set<int> getSafeChains(const GfaGraph& graph, size_t safeChainSiz
 		size_t size = 0;
 		int chain = 0;
 		size_t kmers = 0;
-		bool hasKmers = false;
+		bool hasKmers = true;
 		bool hasSize = false;
 		bool hasChain = false;
 		std::stringstream sstr { tags.second };
+		if (coveragePerNode.count(tags.first) == 1)
+		{
+			hasKmers = true;
+			kmers = coveragePerNode.at(tags.first);
+		}		
 		while (sstr.good())
 		{
 			std::string tag;
 			sstr >> tag;
-			if (tag.substr(0, 5) == "RC:i:")
-			{
-				assert(!hasKmers);
-				hasKmers = true;
-				kmers = std::stol(tag.substr(5));
-			}
+			// if (tag.substr(0, 5) == "RC:i:")
+			// {
+			// 	assert(!hasKmers);
+			// 	hasKmers = true;
+			// 	kmers = std::stol(tag.substr(5));
+			// }
 			if (tag.substr(0, 5) == "LN:i:")
 			{
 				assert(!hasSize);
@@ -69,7 +74,6 @@ std::unordered_set<int> getSafeChains(const GfaGraph& graph, size_t safeChainSiz
 		totalKmers += kmers;
 		totalSize += size;
 	}
-	double averageCoverage = (double)totalKmers / (double)totalSize;
 	std::cerr << "average coverage " << averageCoverage << std::endl;
 	std::unordered_set<int> result;
 	for (auto pair : chainSize)
@@ -236,20 +240,27 @@ std::vector<ResolvableComponent> getComponents(const GfaGraph& graph, const std:
 	return result;
 }
 
-std::vector<Path> loadAlignmentsAsPaths(std::string filename)
+std::tuple<std::vector<Path>, std::unordered_map<size_t, size_t>, size_t> loadAlignmentsAsPaths(std::string filename)
 {
 	std::vector<Path> result;
 	std::ifstream file { filename, std::ios::in | std::ios::binary };
-	std::function<void(vg::Alignment&)> lambda = [&result](vg::Alignment& g) {
+	size_t bpCount = 0;
+	std::unordered_map<size_t, size_t> coveragePerNode;
+	std::function<void(vg::Alignment&)> lambda = [&result, &bpCount, &coveragePerNode](vg::Alignment& g) {
 		result.emplace_back();
 		result.back().name = g.name();
+		bpCount += g.sequence().size();
 		for (int i = 0; i < g.path().mapping_size(); i++)
 		{
 			result.back().path.emplace_back(g.path().mapping(i).position().node_id(), !g.path().mapping(i).position().is_reverse());
+			for (size_t j = 0; j < g.path().mapping(i).edit_size(); j++)
+			{
+				coveragePerNode[g.path().mapping(i).position().node_id()] += g.path().mapping(i).edit(j).to_length();
+			}
 		}
 	};
 	stream::for_each(file, lambda);
-	return result;
+	return std::make_tuple(result, coveragePerNode, bpCount);
 }
 
 std::vector<std::vector<Subpath>> splitPathsPerComponent(const std::vector<Path>& paths, const std::vector<ResolvableComponent>& components, const std::unordered_set<int>& safeChains, const std::unordered_map<int, int>& belongsToChain)
@@ -395,14 +406,19 @@ bool canPartiallyResolve(const std::vector<Subpath>& pathsPerComponent, const Re
 {
 	size_t totalSafeCrossing = 0;
 	std::unordered_map<int, std::unordered_map<int, size_t>> crossers;
-	std::unordered_map<int, size_t> totalCrossers;
 	for (auto path : pathsPerComponent)
 	{
-		if (safeChains.count(belongsToChain.at(path.path[0].id)) == 1) totalCrossers[path.path[0].id] += 1;
-		if (safeChains.count(belongsToChain.at(path.path.back().id)) == 1) totalCrossers[path.path.back().id] += 1;
 		if (safeChains.count(belongsToChain.at(path.path[0].id)) == 0 || safeChains.count(belongsToChain.at(path.path.back().id)) == 0) continue;
 		crossers[path.path[0].id][path.path.back().id] += 1;
 		crossers[path.path.back().id][path.path[0].id] += 1;
+	}
+	std::unordered_map<int, size_t> totalCrossers;
+	for (auto pair : crossers)
+	{
+		for (auto pair2 : pair.second)
+		{
+			totalCrossers[pair.first] += pair2.second;
+		}
 	}
 	std::unordered_set<std::pair<int, int>> potentiallyResolvable;
 	for (auto pair : crossers)
@@ -647,14 +663,19 @@ void resolvePartially(int& nextNodeId, const std::unordered_map<int, size_t>& no
 {
 	size_t totalSafeCrossing = 0;
 	std::unordered_map<int, std::unordered_map<int, size_t>> crossers;
-	std::unordered_map<int, size_t> totalCrossers;
 	for (auto path : pathsPerComponent)
 	{
-		if (safeChains.count(belongsToChain.at(path.path[0].id)) == 1) totalCrossers[path.path[0].id] += 1;
-		if (safeChains.count(belongsToChain.at(path.path.back().id)) == 1) totalCrossers[path.path.back().id] += 1;
 		if (safeChains.count(belongsToChain.at(path.path[0].id)) == 0 || safeChains.count(belongsToChain.at(path.path.back().id)) == 0) continue;
 		crossers[path.path[0].id][path.path.back().id] += 1;
 		crossers[path.path.back().id][path.path[0].id] += 1;
+	}
+	std::unordered_map<int, size_t> totalCrossers;
+	for (auto pair : crossers)
+	{
+		for (auto pair2 : pair.second)
+		{
+			totalCrossers[pair.first] += pair2.second;
+		}
 	}
 	std::unordered_set<std::pair<int, int>> potentiallyResolvable;
 	for (auto pair : crossers)
@@ -891,13 +912,13 @@ void resolveComponentsAndReplacePaths(GfaGraph& graph, const std::unordered_set<
 			if (nodeSize > graph.edgeOverlap) nodeSize -= graph.edgeOverlap;
 			size += nodeSize;
 		}
-		if (canResolve(pathsPerComponent[i], components[i], safeChains, belongsToChain))
-		{
-			resolve(nextNodeId, nodeSizes, pathsPerComponent[i], components[i], safeChains, belongsToChain);
-			resolvedComponents += 1;
-			updateGraph(graph, components[i], safeChains, belongsToChain);
-		}
-		else if (canPartiallyResolve(pathsPerComponent[i], components[i], safeChains, belongsToChain))
+		// if (canResolve(pathsPerComponent[i], components[i], safeChains, belongsToChain))
+		// {
+		// 	resolve(nextNodeId, nodeSizes, pathsPerComponent[i], components[i], safeChains, belongsToChain);
+		// 	resolvedComponents += 1;
+		// 	updateGraph(graph, components[i], safeChains, belongsToChain);
+		// }
+		if (canPartiallyResolve(pathsPerComponent[i], components[i], safeChains, belongsToChain))
 		{
 			resolvePartially(nextNodeId, nodeSizes, pathsPerComponent[i], components[i], safeChains, belongsToChain, graph);
 			partiallyResolvedComponents += 1;
@@ -922,12 +943,15 @@ int main(int argc, char** argv)
 
 	auto graph = GfaGraph::LoadFromFile(graphFile, true);
 	graph.confirmDoublesidedEdges();
-	auto safeChains = getSafeChains(graph, safeChainSize, genomeSize);
+	auto alninfo = loadAlignmentsAsPaths(alignmentFile);
+	auto paths = std::get<0>(alninfo);
+	auto coveragePerNode = std::get<1>(alninfo);
+	size_t bpCount = std::get<2>(alninfo);
+	auto safeChains = getSafeChains(graph, safeChainSize, coveragePerNode, (double)bpCount/(double)genomeSize);
 	std::cerr << safeChains.size() << " safe chains" << std::endl;
 	auto belongsToChain = getChainBelongers(graph);
 	auto components = getComponents(graph, safeChains, belongsToChain);
 	std::cerr << components.size() << " components" << std::endl;
-	auto paths = loadAlignmentsAsPaths(alignmentFile);
 	resolveComponentsAndReplacePaths(graph, safeChains, belongsToChain, components, paths);
 	graph.SaveToFile(outputGraphFile);
 	// writePaths(translatedAlignmentFile);
