@@ -17,27 +17,35 @@ def getfirst(s):
 	for item in s:
 		return item
 
-def rec_add_nodes(bubble_nodes, node, end_node):
+def get_bubble_nodes(node, end_node):
 	global graph
-	if node[0] in bubble_nodes: return
-	bubble_nodes.add(node[0])
-	if node == end_node: return
-	for edge in graph.edges[node]:
-		rec_add_nodes(bubble_nodes, edge[0], end_node)
+	check = [node]
+	bubble_nodes = set()
+	while len(check) > 0:
+		pos = check.pop()
+		if pos[0] in bubble_nodes: continue
+		bubble_nodes.add(pos[0])
+		if pos == end_node: continue
+		for edge in graph.edges[pos]:
+			check.append(edge[0])
+	return bubble_nodes
 
-def rec_add_edges(bubble_edges, node, end_node):
+def get_bubble_edges(node, end_node):
 	global graph
-	for edge in graph.edges[node]:
-		if (node, edge[0]) in bubble_edges: continue
-		bubble_edges.add((node, edge[0]))
-		if edge[0] != end_node: rec_add_edges(bubble_edges, edge[0], end_node)
+	check = [node]
+	bubble_edges = set()
+	while len(check) > 0:
+		pos = check.pop()
+		for edge in graph.edges[pos]:
+			if (pos, edge[0]) in bubble_edges: continue
+			bubble_edges.add((pos, edge[0]))
+			if edge[0] != end_node: check.append(edge[0])
+	return bubble_edges
 
 def collapse(start_node, end_node):
 	global graph
-	bubble_nodes = set()
-	rec_add_nodes(bubble_nodes, start_node, end_node)
-	bubble_edges = set()
-	rec_add_edges(bubble_edges, start_node, end_node)
+	bubble_nodes = get_bubble_nodes(start_node, end_node)
+	bubble_edges = get_bubble_edges(start_node, end_node)
 	path = [start_node]
 	while path[-1] != end_node:
 		path.append(getfirst(graph.edges[path[-1]])[0])
