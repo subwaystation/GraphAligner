@@ -65,6 +65,7 @@ public:
 	size_t edgeOverlap;
 	std::unordered_map<int, std::string> tags;
 	std::unordered_map<int, std::string> originalNodeName;
+	std::vector<std::vector<NodePos>> paths;
 private:
 	void numberBackToIntegers();
 };

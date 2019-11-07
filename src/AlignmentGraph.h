@@ -123,6 +123,7 @@ private:
 	std::vector<AmbiguousChunkSequence> ambiguousNodeSequences;
 	std::vector<bool> ambiguousNodes;
 	std::vector<size_t> componentNumber;
+	std::vector<std::vector<int>> indexPaths;
 	size_t firstAmbiguous;
 	size_t DBGoverlap;
 	bool finalized;

@@ -179,6 +179,7 @@ void GfaGraph::numberBackToIntegers()
 	std::unordered_map<NodePos, std::vector<NodePos>> newEdges;
 	std::unordered_map<std::pair<NodePos, NodePos>, size_t> newVaryingOverlaps;
 	std::unordered_map<int, std::string> newTags;
+	std::vector<std::vector<NodePos>> newPaths;
 	for (auto pair : varyingOverlaps)
 	{
 		auto key = pair.first;
@@ -202,10 +203,19 @@ void GfaGraph::numberBackToIntegers()
 	{
 		newTags[std::stoi(originalNodeName[tag.first])] = tag.second;
 	}
+	for (auto path : paths)
+	{
+		newPaths.emplace_back();
+		for (auto pos : path)
+		{
+			newPaths.back().emplace_back(std::stoi(originalNodeName[pos.id]), pos.end);
+		}
+	}
 	varyingOverlaps = std::move(newVaryingOverlaps);
 	nodes = std::move(newNodes);
 	edges = std::move(newEdges);
 	tags = std::move(newTags);
+	paths = std::move(newPaths);
 	originalNodeName.clear();
 }
 
@@ -220,7 +230,7 @@ GfaGraph GfaGraph::LoadFromStream(std::istream& file, bool allowVaryingOverlaps)
 		std::getline(file, line);
 		if (!file.good()) break;
 		if (line.size() == 0) continue;
-		if (line[0] != 'S' && line[0] != 'L') continue;
+		if (line[0] != 'S' && line[0] != 'L' && line[0] != 'P') continue;
 		if (line[0] == 'S')
 		{
 			std::stringstream sstr {line};
@@ -286,6 +296,31 @@ GfaGraph GfaGraph::LoadFromStream(std::istream& file, bool allowVaryingOverlaps)
 			{
 				result.varyingOverlaps[std::make_pair(frompos, topos)] = overlap;
 			}
+		}
+		if (line[0] == 'P')
+		{
+			std::stringstream sstr {line};
+			std::string dummy;
+			sstr >> dummy;
+			assert(dummy == "P");
+			sstr >> dummy;
+			std::string nodestr;
+			sstr >> nodestr;
+			result.paths.emplace_back();
+			size_t lastEnd = 0;
+			for (size_t i = 0; i < nodestr.size(); i++)
+			{
+				if (nodestr[i] == ',')
+				{
+					int nodeId = getNameId(nameMapping, nodestr.substr(lastEnd, i-lastEnd-1));
+					bool end = (nodestr[i-1] == '+');
+					result.paths.back().emplace_back(nodeId, end);
+					lastEnd = i+1;
+				}
+			}
+			int nodeId = getNameId(nameMapping, nodestr.substr(lastEnd, nodestr.size()-1-lastEnd));
+			bool end = (nodestr.back() == '+');
+			result.paths.back().emplace_back(nodeId, end);
 		}
 	}
 	if (hasVaryingOverlaps) result.edgeOverlap = 0;

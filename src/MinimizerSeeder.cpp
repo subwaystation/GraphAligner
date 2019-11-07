@@ -196,7 +196,9 @@ void MinimizerSeeder::initMinimizers(size_t numThreads)
 	assert(positionSize + 6 < 64);
 	assert(minimizerLength * 2 < 64);
 	auto nodeIter = graph.nodeLookup.begin();
+	auto pathIter = graph.indexPaths.begin();
 	std::mutex nodeMutex;
+	std::mutex pathMutex;
 	std::vector<std::thread> threads;
 	std::vector<sdsl::int_vector<0>> kmerPerBucket;
 	std::vector<sdsl::int_vector<0>> positionPerBucket;
@@ -214,13 +216,105 @@ void MinimizerSeeder::initMinimizers(size_t numThreads)
 		buckets[i].positions.width(positionSize + 6);
 	}
 
+	std::unordered_set<int> idsCoveredByPath;
+	for (const auto& path : graph.indexPaths)
+	{
+		idsCoveredByPath.insert(path.begin(), path.end());
+	}
+
 	for (size_t thread = 0; thread < numThreads; thread++)
 	{
-		threads.emplace_back([this, &positionDistributor, &threadsDone, &kmerPerBucket, &positionPerBucket, thread, numThreads, &nodeMutex, &nodeIter, positionSize](){
+		threads.emplace_back([this, &positionDistributor, &threadsDone, &kmerPerBucket, &positionPerBucket, thread, numThreads, &nodeMutex, &nodeIter, &pathIter, &pathMutex, positionSize, &idsCoveredByPath](){
 			size_t vecPos = 0;
 			kmerPerBucket[thread].resize(10);
 			positionPerBucket[thread].resize(10);
 			std::pair<uint64_t, uint64_t> readThis;
+			while (true)
+			{
+				auto iter = graph.indexPaths.end();
+				{
+					std::lock_guard<std::mutex> guard { pathMutex };
+					iter = pathIter;
+					if (pathIter != graph.indexPaths.end()) ++pathIter;
+				}
+				if (iter == graph.indexPaths.end()) break;
+				const auto& path = *iter;
+				if (path.size() == 0) continue;
+				std::string sequence;
+				std::vector<size_t> nodeIds;
+				std::vector<size_t> nodeOffsets;
+				std::vector<size_t> nodeSeqPos;
+				nodeIds.push_back(graph.nodeLookup.at(path[0])[0]);
+				nodeOffsets.push_back(0);
+				nodeSeqPos.push_back(0);
+				size_t pathIndex = 0;
+				while (pathIndex < path.size())
+				{
+					size_t nextThis = std::numeric_limits<size_t>::max();
+					size_t nextNext = std::numeric_limits<size_t>::max();
+					for (auto neighbor : graph.outNeighbors[nodeIds.back()])
+					{
+						if (graph.nodeIDs[neighbor] == path[pathIndex]) nextThis = neighbor;
+						if (pathIndex < path.size()-1 && graph.nodeIDs[neighbor] == path[pathIndex+1]) nextNext = neighbor;
+					}
+					if (nextThis != std::numeric_limits<size_t>::max())
+					{
+						nodeSeqPos.push_back(nodeSeqPos.back() + graph.NodeLength(nodeIds.back()));
+						nodeIds.push_back(nextThis);
+						nodeOffsets.push_back(graph.nodeOffset[nextThis]);
+					}
+					else if (nextNext != std::numeric_limits<size_t>::max())
+					{
+						nodeSeqPos.push_back(nodeSeqPos.back() + graph.NodeLength(nodeIds.back()));
+						nodeIds.push_back(nextNext);
+						nodeOffsets.push_back(graph.nodeOffset[nextNext]);
+						pathIndex += 1;
+					}
+					else
+					{
+						break;
+					}
+				}
+				sequence.reserve(nodeSeqPos.back() + graph.NodeLength(nodeIds.back()));
+				for (auto node : nodeIds)
+				{
+					for (size_t i = 0; i < graph.NodeLength(node); i++)
+					{
+						sequence.push_back(graph.NodeSequences(node, i));
+					}
+				}
+				assert(sequence.size() == nodeSeqPos.back() + graph.NodeLength(nodeIds.back()));
+				size_t nodeIndex = 0;
+				iterateMinimizers(sequence, minimizerLength, windowSize, [this, &nodeIds, &nodeOffsets, &nodeSeqPos, &positionDistributor, &kmerPerBucket, &positionPerBucket, &vecPos, &nodeIndex, positionSize, thread](size_t pos, size_t kmer)
+				{
+					while (nodeSeqPos[nodeIndex] < pos) nodeIndex++;
+					assert(nodeIndex < nodeIds.size());
+					size_t splitNode = nodeIds[nodeIndex];
+					size_t remainingOffset = pos - nodeSeqPos[nodeIndex];
+					std::pair<uint64_t, uint64_t> readThis;
+					while (positionDistributor[thread].try_dequeue(readThis))
+					{
+						assert(readThis.first < ((uint64_t)1) << (kmerPerBucket[thread].width()));
+						assert(readThis.second < ((uint64_t)1) << (positionPerBucket[thread].width()));
+						assert(getBucket(readThis.first) == thread);
+						if (vecPos == kmerPerBucket[thread].size())
+						{
+							kmerPerBucket[thread].resize(kmerPerBucket[thread].size() * 2);
+							positionPerBucket[thread].resize(kmerPerBucket[thread].size() * 2);
+						}
+						kmerPerBucket[thread][vecPos] = readThis.first;
+						positionPerBucket[thread][vecPos] = readThis.second;
+						vecPos += 1;
+					}
+					std::pair<uint64_t, uint64_t> storeThis;
+					storeThis.first = kmer;
+					size_t bucket = getBucket(kmer);
+					storeThis.second = splitNode;
+					storeThis.second <<= 6;
+					storeThis.second += remainingOffset;
+					positionDistributor[bucket].enqueue(storeThis);
+				});
+			}
 			while (true)
 			{
 				auto iter = graph.nodeLookup.end();
@@ -231,6 +325,7 @@ void MinimizerSeeder::initMinimizers(size_t numThreads)
 				}
 				if (iter == graph.nodeLookup.end()) break;
 				int nodeId = iter->first;
+				if (idsCoveredByPath.count(nodeId) == 1) continue;
 				int firstNode = iter->second[0];
 				std::string sequence;
 				sequence.resize(graph.originalNodeSize.at(nodeId));

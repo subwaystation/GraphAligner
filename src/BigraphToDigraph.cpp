@@ -262,6 +262,19 @@ AlignmentGraph DirectedGraph::BuildFromGFA(const GfaGraph& graph, bool tryDAG)
 			result.AddEdgeNodeId(pair.second.fromId, pair.second.toId, pair.second.overlap);
 		}
 	}
+	for (const auto& path : graph.paths)
+	{
+		result.indexPaths.emplace_back();
+		for (auto node : path)
+		{
+			result.indexPaths.back().push_back(node.id * 2 + (node.end ? 0 : 1));
+		}
+		result.indexPaths.emplace_back();
+		for (size_t i = path.size()-1; i < path.size(); i--)
+		{
+			result.indexPaths.back().push_back(path[i].id * 2 + (path[i].end ? 1 : 0));
+		}
+	}
 	result.Finalize(64, tryDAG);
 	return result;
 }
