@@ -287,7 +287,11 @@ void MinimizerSeeder::initMinimizers(size_t numThreads)
 				size_t nodeIndex = 0;
 				iterateMinimizers(sequence, minimizerLength, windowSize, [this, &nodeIds, &nodeOffsets, &nodeSeqPos, &positionDistributor, &kmerPerBucket, &positionPerBucket, &vecPos, &nodeIndex, positionSize, thread](size_t pos, size_t kmer)
 				{
-					while (nodeSeqPos[nodeIndex] < pos) nodeIndex++;
+					while (nodeIndex < nodeSeqPos.size() && nodeSeqPos[nodeIndex] <= pos) nodeIndex++;
+					assert(nodeIndex > 0);
+					nodeIndex -= 1;
+					assert(nodeSeqPos[nodeIndex] <= pos);
+					assert(nodeIndex == nodeSeqPos.size()-1 || nodeSeqPos[nodeIndex+1] > pos);
 					assert(nodeIndex < nodeIds.size());
 					size_t splitNode = nodeIds[nodeIndex];
 					size_t remainingOffset = pos - nodeSeqPos[nodeIndex];
