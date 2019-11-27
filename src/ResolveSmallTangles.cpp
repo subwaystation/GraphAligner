@@ -3,6 +3,8 @@
 #include "GfaGraph.h"
 #include "CommonUtils.h"
 
+constexpr double min_fraction_to_resolve = 0.7;
+
 namespace std {
 	template <> struct hash<std::pair<int, int>>
 	{
@@ -427,7 +429,7 @@ bool canPartiallyResolve(const std::vector<Subpath>& pathsPerComponent, const Re
 		assert(total > 0);
 		for (auto other : pair.second)
 		{
-			if (other.second > total * 0.7) potentiallyResolvable.emplace(pair.first, other.first);
+			if (other.second > total * min_fraction_to_resolve) potentiallyResolvable.emplace(pair.first, other.first);
 		}
 	}
 	std::vector<std::pair<int, int>> resolvable;
@@ -662,14 +664,14 @@ void resolve(int& nextNodeId, const std::unordered_map<int, size_t>& nodeSizes, 
 void resolvePartially(int& nextNodeId, const std::unordered_map<int, size_t>& nodeSizes, std::vector<Subpath>& pathsPerComponent, ResolvableComponent& component, const std::unordered_set<int>& safeChains, const std::unordered_map<int, int>& belongsToChain, const GfaGraph& graph)
 {
 	size_t totalSafeCrossing = 0;
-	std::unordered_map<int, std::unordered_map<int, size_t>> crossers;
+	std::unordered_map<NodePos, std::unordered_map<NodePos, size_t>> crossers;
 	for (auto path : pathsPerComponent)
 	{
 		if (safeChains.count(belongsToChain.at(path.path[0].id)) == 0 || safeChains.count(belongsToChain.at(path.path.back().id)) == 0) continue;
-		crossers[path.path[0].id][path.path.back().id] += 1;
-		crossers[path.path.back().id][path.path[0].id] += 1;
+		crossers[path.path[0]][path.path.back()] += 1;
+		crossers[path.path.back().Reverse()][path.path[0].Reverse()] += 1;
 	}
-	std::unordered_map<int, size_t> totalCrossers;
+	std::unordered_map<NodePos, size_t> totalCrossers;
 	for (auto pair : crossers)
 	{
 		for (auto pair2 : pair.second)
@@ -677,21 +679,21 @@ void resolvePartially(int& nextNodeId, const std::unordered_map<int, size_t>& no
 			totalCrossers[pair.first] += pair2.second;
 		}
 	}
-	std::unordered_set<std::pair<int, int>> potentiallyResolvable;
+	std::unordered_set<std::pair<NodePos, NodePos>> potentiallyResolvable;
 	for (auto pair : crossers)
 	{
 		size_t total = totalCrossers.at(pair.first);
 		assert(total > 0);
 		for (auto other : pair.second)
 		{
-			if (other.second > total * 0.7) potentiallyResolvable.emplace(pair.first, other.first);
+			if (other.second > total * min_fraction_to_resolve) potentiallyResolvable.emplace(pair.first, other.first);
 		}
 	}
-	std::unordered_set<std::pair<int, int>> resolvable;
+	std::unordered_set<std::pair<NodePos, NodePos>> resolvable;
 	for (auto pair : potentiallyResolvable)
 	{
-		if (pair.second < pair.first) continue;
-		if (potentiallyResolvable.count(std::make_pair(pair.second, pair.first)) == 1)
+		if (canon(pair.first, pair.second) != pair) continue;
+		if (potentiallyResolvable.count(std::make_pair(pair.second.Reverse(), pair.first.Reverse())) == 1)
 		{
 			resolvable.insert(pair);
 		}
@@ -703,8 +705,7 @@ void resolvePartially(int& nextNodeId, const std::unordered_map<int, size_t>& no
 		if (safeChains.count(belongsToChain.at(pathsPerComponent[i].path[0].id)) == 0) continue;
 		if (safeChains.count(belongsToChain.at(pathsPerComponent[i].path.back().id)) == 0) continue;
 		auto key = canon(pathsPerComponent[i].path[0], pathsPerComponent[i].path.back());
-		std::pair<int, int> check { key.first.id, key.second.id };
-		if (resolvable.count(check) == 0) continue;
+		if (resolvable.count(key) == 0) continue;
 		subpathsPerConnection[key].push_back(i);
 	}
 	assert(subpathsPerConnection.size() == resolvable.size());
