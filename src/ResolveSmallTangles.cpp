@@ -407,14 +407,14 @@ bool canResolve(const std::vector<Subpath>& pathsPerComponent, const ResolvableC
 bool canPartiallyResolve(const std::vector<Subpath>& pathsPerComponent, const ResolvableComponent& component, const std::unordered_set<int>& safeChains, const std::unordered_map<int, int>& belongsToChain)
 {
 	size_t totalSafeCrossing = 0;
-	std::unordered_map<int, std::unordered_map<int, size_t>> crossers;
+	std::unordered_map<NodePos, std::unordered_map<NodePos, size_t>> crossers;
 	for (auto path : pathsPerComponent)
 	{
 		if (safeChains.count(belongsToChain.at(path.path[0].id)) == 0 || safeChains.count(belongsToChain.at(path.path.back().id)) == 0) continue;
-		crossers[path.path[0].id][path.path.back().id] += 1;
-		crossers[path.path.back().id][path.path[0].id] += 1;
+		crossers[path.path[0]][path.path.back()] += 1;
+		crossers[path.path.back().Reverse()][path.path[0].Reverse()] += 1;
 	}
-	std::unordered_map<int, size_t> totalCrossers;
+	std::unordered_map<NodePos, size_t> totalCrossers;
 	for (auto pair : crossers)
 	{
 		for (auto pair2 : pair.second)
@@ -422,7 +422,7 @@ bool canPartiallyResolve(const std::vector<Subpath>& pathsPerComponent, const Re
 			totalCrossers[pair.first] += pair2.second;
 		}
 	}
-	std::unordered_set<std::pair<int, int>> potentiallyResolvable;
+	std::unordered_set<std::pair<NodePos, NodePos>> potentiallyResolvable;
 	for (auto pair : crossers)
 	{
 		size_t total = totalCrossers.at(pair.first);
@@ -432,11 +432,11 @@ bool canPartiallyResolve(const std::vector<Subpath>& pathsPerComponent, const Re
 			if (other.second > total * min_fraction_to_resolve) potentiallyResolvable.emplace(pair.first, other.first);
 		}
 	}
-	std::vector<std::pair<int, int>> resolvable;
+	std::vector<std::pair<NodePos, NodePos>> resolvable;
 	for (auto pair : potentiallyResolvable)
 	{
-		if (pair.second < pair.first) continue;
-		if (potentiallyResolvable.count(std::make_pair(pair.second, pair.first)) == 1)
+		if (canon(pair.first, pair.second) != pair) continue;
+		if (potentiallyResolvable.count(std::make_pair(pair.second.Reverse(), pair.first.Reverse())) == 1)
 		{
 			resolvable.push_back(pair);
 		}
@@ -446,7 +446,7 @@ bool canPartiallyResolve(const std::vector<Subpath>& pathsPerComponent, const Re
 		std::cerr << "can partially resolve";
 		for (auto pair : resolvable)
 		{
-			std::cerr << " " << pair.first << "-" << pair.second;
+			std::cerr << " " << pair.first.id << "-" << pair.second.id;
 		}
 		std::cerr << std::endl;
 		return true;
