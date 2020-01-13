@@ -1,5 +1,5 @@
 GPP=$(CXX)
-CPPFLAGS=-Wall -Wextra -std=c++14 -O3 -g -Iconcurrentqueue -Izstr/src `pkg-config --cflags protobuf` `pkg-config --cflags libsparsehash` `pkg-config --cflags mummer` -fopenmp -Wno-unused-parameter
+CPPFLAGS=-Wall -Wextra -std=c++14 -O0 -g -Iconcurrentqueue -Izstr/src `pkg-config --cflags protobuf` `pkg-config --cflags libsparsehash` `pkg-config --cflags mummer` -fopenmp -Wno-unused-parameter
 
 ODIR=obj
 BINDIR=bin
@@ -75,6 +75,9 @@ $(BINDIR)/ResolveSmallTangles: $(SRCDIR)/ResolveSmallTangles.cpp $(ODIR)/CommonU
 	$(GPP) -o $@ $^ $(LINKFLAGS)
 
 $(BINDIR)/InduceOverlaps: $(SRCDIR)/InduceOverlaps.cpp $(ODIR)/Assemble.o $(ODIR)/CommonUtils.o $(ODIR)/vg.pb.o $(ODIR)/GfaGraph.o $(ODIR)/fastqloader.o $(ODIR)/ThreadReadAssertion.o
+	$(GPP) -o $@ $^ $(LINKFLAGS)
+
+$(BINDIR)/ContextResolve: $(SRCDIR)/ContextResolve.cpp $(ODIR)/Assemble.o $(ODIR)/CommonUtils.o $(ODIR)/vg.pb.o $(ODIR)/GfaGraph.o $(ODIR)/fastqloader.o $(ODIR)/ThreadReadAssertion.o
 	$(GPP) -o $@ $^ $(LINKFLAGS)
 
 all: $(BINDIR)/GraphAligner $(BINDIR)/ExtractPathSequence $(BINDIR)/SelectLongestAlignment $(BINDIR)/AlignmentSubsequenceIdentity $(BINDIR)/PickAdjacentAlnPairs $(BINDIR)/ExtractCorrectedReads $(BINDIR)/UntipRelative
