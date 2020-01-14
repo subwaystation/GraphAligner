@@ -80,6 +80,9 @@ $(BINDIR)/InduceOverlaps: $(SRCDIR)/InduceOverlaps.cpp $(ODIR)/Assemble.o $(ODIR
 $(BINDIR)/ContextResolve: $(SRCDIR)/ContextResolve.cpp $(ODIR)/Assemble.o $(ODIR)/CommonUtils.o $(ODIR)/vg.pb.o $(ODIR)/GfaGraph.o $(ODIR)/fastqloader.o $(ODIR)/ThreadReadAssertion.o
 	$(GPP) -o $@ $^ $(LINKFLAGS)
 
+$(BINDIR)/NetworkFlowCopyCounter: $(SRCDIR)/NetworkFlowCopyCounter.cpp $(ODIR)/Assemble.o $(ODIR)/CommonUtils.o $(ODIR)/vg.pb.o $(ODIR)/GfaGraph.o $(ODIR)/fastqloader.o $(ODIR)/ThreadReadAssertion.o
+	$(GPP) -o $@ $^ $(LINKFLAGS)
+
 all: $(BINDIR)/GraphAligner $(BINDIR)/ExtractPathSequence $(BINDIR)/SelectLongestAlignment $(BINDIR)/AlignmentSubsequenceIdentity $(BINDIR)/PickAdjacentAlnPairs $(BINDIR)/ExtractCorrectedReads $(BINDIR)/UntipRelative
 
 clean:
