@@ -30,14 +30,15 @@ public:
 	size_t maxNode;
 };
 
-double contiguityBreakProbability()
+double contiguityBreakLogOdds()
 {
-	return 2.0 / 4600000.0; //approx from e. coli
+	//arbitrarily say 1 contiguity break per 3Gbp
+	return (log(2.0) - log(3000000000.0)); //approx from e. coli
 }
 
 double contiguityBreakScore()
 {
-	return -log(contiguityBreakProbability());
+	return -contiguityBreakLogOdds();
 }
 
 double copyCountLogOdd(double relativeCoverage)
@@ -47,14 +48,23 @@ double copyCountLogOdd(double relativeCoverage)
 	constexpr double lambda = 1;
 	if (relativeCoverage <= 0.01) return -5;
 	double logpmf = (log(relativeCoverage) * (k-1) - lambda * relativeCoverage);
-	// if (logpmf < -5) logpmf = -5;
 	return logpmf;
 }
 
 double copyCountScore(double relativeCoverage, double length)
 {
 	//arbitrarily take sqrt of length to flatten distribution
-	return -copyCountLogOdd(relativeCoverage) * pow(length, 0.5);
+	return -copyCountLogOdd(relativeCoverage) * pow(length, 0.25);
+}
+
+double zeroCountLogOdd(double relativeCoverage)
+{
+	return log(.0001) * relativeCoverage;
+}
+
+double zeroCountScore(double relativeCoverage, double length)
+{
+	return -zeroCountLogOdd(relativeCoverage) * pow(length, 0.25);
 }
 
 std::pair<size_t, size_t> getNodeKmersLength(const GfaGraph& graph, int nodeId)
@@ -83,6 +93,15 @@ std::pair<size_t, size_t> getNodeKmersLength(const GfaGraph& graph, int nodeId)
 	return std::make_pair(kmers, size);
 }
 
+double copyCountLogOdd(size_t copyCount, double onecopyCoverage, double coverage, size_t length)
+{
+	if (copyCount > 0)
+	{
+		return copyCountScore(copyCount * onecopyCoverage / coverage, length);
+	}
+	return zeroCountScore(coverage, length);
+}
+
 FlowGraph buildFlowGraph(const GfaGraph& graph, int numChromosomes, double onecopyCoverage)
 {
 	FlowGraph result;
@@ -101,9 +120,9 @@ FlowGraph buildFlowGraph(const GfaGraph& graph, int numChromosomes, double oneco
 		result.edges.emplace_back(NodePos { -1, true }, -1, nextNode * 4 + 2, 0, 100, 0);
 		result.edges.emplace_back(NodePos { -1, true }, nextNode * 4 + 1, -2, 0, 100, 0);
 		result.edges.emplace_back(NodePos { -1, true }, nextNode * 4 + 3, -2, 0, 100, 0);
-		for (size_t i = onecopyCoverage; i < coverage * 2 + 3 * onecopyCoverage; i += onecopyCoverage)
+		for (size_t copyCount = 1; copyCount < coverage / onecopyCoverage * 2 + 3; copyCount += 1)
 		{
-			double score = copyCountScore((double)i / coverage, length) - copyCountScore((double)(i-onecopyCoverage) / coverage, length);
+			double score = copyCountLogOdd(copyCount, onecopyCoverage, coverage, length) - copyCountLogOdd(copyCount-1, onecopyCoverage, coverage, length);
 			result.edges.emplace_back(NodePos { node.first, true }, nextNode * 4, nextNode * 4 + 1, score, 1, 0);
 			result.edges.emplace_back(NodePos { node.first, false }, nextNode * 4 + 2, nextNode * 4 + 3, score, 1, 0);
 		}
@@ -160,9 +179,9 @@ std::vector<std::pair<size_t, bool>> getNegativeCycle(const FlowGraph& graph, si
 	from.assign(graph.maxNode, 3, std::pair<size_t, bool> { -5, true });
 	posInPath.assign(graph.edges.size(), std::numeric_limits<size_t>::max());
 	distances[start] = 0;
-	for (size_t iter = 0; iter < graph.maxNode+5; iter++)
+	size_t iter = 0;
+	for (iter = 0; iter < graph.maxNode+5; iter++)
 	{
-		if (iter % 100 == 0) std::cout << "Bellman-Ford iteration " << iter << "/" << graph.maxNode << std::endl;
 		bool changed = false;
 		for (size_t i = 0; i < graph.edges.size(); i++)
 		{
@@ -185,27 +204,44 @@ std::vector<std::pair<size_t, bool>> getNegativeCycle(const FlowGraph& graph, si
 				}
 			}
 		}
-		if (!changed) break;
+		if (!changed)
+		{
+			std::cout << "distances converged ";
+			break;
+		}
+		if (distances[start] < 0)
+		{
+			std::cout << "loop to start found ";
+			break;
+		}
 	}
+	std::cout << "Bellman-Ford took " << iter << " iterations" << std::endl;
 	
 	std::cout << "find path" << std::endl;
 	std::vector<std::pair<size_t, bool>> result;
-	for (size_t i = 0; i < graph.edges.size(); i++)
+	if (distances[start] < 0)
 	{
-		if (graph.edges[i].used < graph.edges[i].capacity)
+		result.emplace_back(from[start]);
+	}
+	else
+	{
+		for (size_t i = 0; i < graph.edges.size(); i++)
 		{
-			if (distances[graph.edges[i].to] > distances[graph.edges[i].from] + graph.edges[i].cost)
+			if (graph.edges[i].used < graph.edges[i].capacity)
 			{
-				result.emplace_back(i, true);
-				break;
+				if (distances[graph.edges[i].to] > distances[graph.edges[i].from] + graph.edges[i].cost)
+				{
+					result.emplace_back(i, true);
+					break;
+				}
 			}
-		}
-		if (graph.edges[i].used > 0)
-		{
-			if (distances[graph.edges[i].from] > distances[graph.edges[i].to] - graph.edges[i].cost)
+			if (graph.edges[i].used > 0)
 			{
-				result.emplace_back(i, false);
-				break;
+				if (distances[graph.edges[i].from] > distances[graph.edges[i].to] - graph.edges[i].cost)
+				{
+					result.emplace_back(i, false);
+					break;
+				}
 			}
 		}
 	}
@@ -214,7 +250,6 @@ std::vector<std::pair<size_t, bool>> getNegativeCycle(const FlowGraph& graph, si
 		assert(distances[start] == 0);
 		return result;
 	}
-	assert(distances[start] < 0);
 	assert(result.size() == 1);
 	size_t lastNode = graph.edges[result[0].first].from;
 	if (result[0].second) lastNode = graph.edges[result[0].first].to;
@@ -293,7 +328,7 @@ void solveFlow(FlowGraph& graph)
 			{
 				assert(graph.edges[pair.first].used > 0);
 				available = std::min(available, graph.edges[pair.first].used);
-				cost += graph.edges[pair.first].cost;
+				cost -= graph.edges[pair.first].cost;
 			}
 		}
 		assert(available == 1);
