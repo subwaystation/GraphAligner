@@ -32,8 +32,8 @@ public:
 
 double contiguityBreakLogOdds()
 {
-	//arbitrarily say 1 contiguity break per 3Gbp
-	return (log(2.0) - log(3000000000.0)); //approx from e. coli
+	//arbitrarily say 2 contiguity break per 3Gbp
+	return (log(2.0) - log(3000000000.0));
 }
 
 double contiguityBreakScore()
@@ -51,20 +51,28 @@ double copyCountLogOdd(double relativeCoverage)
 	return logpmf;
 }
 
+double lengthLogistic(double length)
+{
+	//arbitrarily weight nodes based on length, short unreliable, approx 5000 bp reliable-ish, less than linearly for longer
+	double result = 1.0 / (1.0 + pow(2.7, -0.001*length + 5)) * log(length);
+	return result;
+}
+
 double copyCountScore(double relativeCoverage, double length)
 {
-	//arbitrarily take sqrt of length to flatten distribution
-	return -copyCountLogOdd(relativeCoverage) * pow(length, 0.25);
+	return -copyCountLogOdd(relativeCoverage) * lengthLogistic(length);
 }
 
 double zeroCountLogOdd(double relativeCoverage)
 {
-	return log(.0001) * relativeCoverage;
+	//assume exponential distribution, return log
+	constexpr double lambda = 10;
+	return -lambda * relativeCoverage + log(lambda);
 }
 
 double zeroCountScore(double relativeCoverage, double length)
 {
-	return -zeroCountLogOdd(relativeCoverage) * pow(length, 0.25);
+	return -zeroCountLogOdd(relativeCoverage) * lengthLogistic(length);
 }
 
 std::pair<size_t, size_t> getNodeKmersLength(const GfaGraph& graph, int nodeId)
@@ -123,6 +131,8 @@ FlowGraph buildFlowGraph(const GfaGraph& graph, int numChromosomes, double oneco
 		for (size_t copyCount = 1; copyCount < coverage / onecopyCoverage * 2 + 3; copyCount += 1)
 		{
 			double score = copyCountLogOdd(copyCount, onecopyCoverage, coverage, length) - copyCountLogOdd(copyCount-1, onecopyCoverage, coverage, length);
+			assert(!std::isnan(score));
+			assert(std::isfinite(score));
 			result.edges.emplace_back(NodePos { node.first, true }, nextNode * 4, nextNode * 4 + 1, score, 1, 0);
 			result.edges.emplace_back(NodePos { node.first, false }, nextNode * 4 + 2, nextNode * 4 + 3, score, 1, 0);
 		}
@@ -137,7 +147,7 @@ FlowGraph buildFlowGraph(const GfaGraph& graph, int numChromosomes, double oneco
 			result.edges.emplace_back(NodePos { -2, true }, nodeStart[target.id] * 4 + 1 + (target.end ? 2 : 0), nodeStart[edge.first.id] * 4 + (edge.first.end ? 2 : 0), 0, 1000000, 0);
 		}
 	}
-	result.edges.emplace_back(NodePos { -3, true }, -2, -3, 0, numChromosomes, 0);
+	result.edges.emplace_back(NodePos { -3, true }, -2, -3, -contiguityBreakScore(), numChromosomes, 0);
 	result.edges.emplace_back(NodePos { -4, true }, -2, -3, contiguityBreakScore(), 1000000, 0);
 	result.edges.emplace_back(NodePos { -4, true }, -3, -1, 0, 1000000, 0);
 	return result;
@@ -393,7 +403,7 @@ double recalcCoverage(const FlowGraph& flowGraph, const GfaGraph& graph)
 		double kmers, length;
 		std::tie(kmers, length) = getNodeKmersLength(graph, node.first);
 		double copyCount = ((double)flowCounts[NodePos { node.first, true }] + (double)flowCounts[NodePos { node.first, false }])/2.0;
-		totalKmers += kmers * copyCount;
+		totalKmers += kmers;
 		totalLength += length * copyCount;
 	}
 	return totalKmers / totalLength;
