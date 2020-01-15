@@ -67,7 +67,8 @@ double zeroCountLogOdd(double relativeCoverage)
 {
 	//assume exponential distribution, return log
 	constexpr double lambda = 10;
-	return -lambda * relativeCoverage + log(lambda);
+	double result = -lambda * relativeCoverage + log(lambda);
+	return result;
 }
 
 double zeroCountScore(double relativeCoverage, double length)
@@ -105,9 +106,9 @@ double copyCountLogOdd(size_t copyCount, double onecopyCoverage, double coverage
 {
 	if (copyCount > 0)
 	{
-		return copyCountScore(copyCount * onecopyCoverage / coverage, length);
+		return copyCountScore(coverage / (copyCount * onecopyCoverage), length);
 	}
-	return zeroCountScore(coverage, length);
+	return zeroCountScore(coverage / onecopyCoverage, length);
 }
 
 FlowGraph buildFlowGraph(const GfaGraph& graph, int numChromosomes, double onecopyCoverage)
@@ -182,6 +183,7 @@ private:
 // https://en.wikipedia.org/wiki/Bellman%E2%80%93Ford_algorithm
 std::vector<std::pair<size_t, bool>> getNegativeCycle(const FlowGraph& graph, size_t start, size_t end)
 {
+	constexpr double delta = 0.0001;
 	static OffsetedVector<double> distances;
 	static OffsetedVector<std::pair<size_t, bool>> from;
 	static std::vector<size_t> posInPath;
@@ -195,9 +197,10 @@ std::vector<std::pair<size_t, bool>> getNegativeCycle(const FlowGraph& graph, si
 		bool changed = false;
 		for (size_t i = 0; i < graph.edges.size(); i++)
 		{
+			if ((graph.edges[i].from == start && graph.edges[i].to == end) || (graph.edges[i].from == end && graph.edges[i].to == start)) continue;
 			if (graph.edges[i].used < graph.edges[i].capacity)
 			{
-				if (distances[graph.edges[i].to] > distances[graph.edges[i].from] + graph.edges[i].cost)
+				if (distances[graph.edges[i].to] > distances[graph.edges[i].from] + graph.edges[i].cost + delta)
 				{
 					from[graph.edges[i].to] = std::make_pair(i, true);
 					distances[graph.edges[i].to] = distances[graph.edges[i].from] + graph.edges[i].cost;
@@ -206,7 +209,7 @@ std::vector<std::pair<size_t, bool>> getNegativeCycle(const FlowGraph& graph, si
 			}
 			if (graph.edges[i].used > 0)
 			{
-				if (distances[graph.edges[i].from] > distances[graph.edges[i].to] - graph.edges[i].cost)
+				if (distances[graph.edges[i].from] > distances[graph.edges[i].to] - graph.edges[i].cost + delta)
 				{
 					from[graph.edges[i].from] = std::make_pair(i, false);
 					distances[graph.edges[i].from] = distances[graph.edges[i].to] - graph.edges[i].cost;
@@ -219,9 +222,9 @@ std::vector<std::pair<size_t, bool>> getNegativeCycle(const FlowGraph& graph, si
 			std::cout << "distances converged ";
 			break;
 		}
-		if (distances[start] < 0)
+		if (distances[end] < 0)
 		{
-			std::cout << "loop to start found ";
+			std::cout << "loop to end found ";
 			break;
 		}
 	}
@@ -229,26 +232,30 @@ std::vector<std::pair<size_t, bool>> getNegativeCycle(const FlowGraph& graph, si
 	
 	std::cout << "find path" << std::endl;
 	std::vector<std::pair<size_t, bool>> result;
-	if (distances[start] < 0)
+	if (distances[end] < 0)
 	{
-		result.emplace_back(from[start]);
+		std::cout << "path from end" << std::endl;
+		result.emplace_back(from[end]);
 	}
 	else
 	{
 		for (size_t i = 0; i < graph.edges.size(); i++)
 		{
+			if ((graph.edges[i].from == start && graph.edges[i].to == end) || (graph.edges[i].from == end && graph.edges[i].to == start)) continue;
 			if (graph.edges[i].used < graph.edges[i].capacity)
 			{
-				if (distances[graph.edges[i].to] > distances[graph.edges[i].from] + graph.edges[i].cost)
+				if (distances[graph.edges[i].to] > distances[graph.edges[i].from] + graph.edges[i].cost + delta)
 				{
+					std::cout << "cycle from edge " << i << "+" << std::endl;
 					result.emplace_back(i, true);
 					break;
 				}
 			}
 			if (graph.edges[i].used > 0)
 			{
-				if (distances[graph.edges[i].from] > distances[graph.edges[i].to] - graph.edges[i].cost)
+				if (distances[graph.edges[i].from] > distances[graph.edges[i].to] - graph.edges[i].cost + delta)
 				{
+					std::cout << "cycle from edge " << i << "-" << std::endl;
 					result.emplace_back(i, false);
 					break;
 				}
@@ -257,7 +264,7 @@ std::vector<std::pair<size_t, bool>> getNegativeCycle(const FlowGraph& graph, si
 	}
 	if (result.size() == 0)
 	{
-		assert(distances[start] == 0);
+		assert(distances[end] >= 0);
 		return result;
 	}
 	assert(result.size() == 1);
@@ -296,7 +303,8 @@ std::vector<std::pair<size_t, bool>> getNegativeCycle(const FlowGraph& graph, si
 	if (result[0].second) lastNode = graph.edges[result[0].first].to;
 	size_t firstNode = graph.edges[result.back().first].to;
 	if (result.back().second) firstNode = graph.edges[result.back().first].from;
-	assert(firstNode == lastNode);
+	assert(firstNode == lastNode || (firstNode == start && lastNode == end));
+	assert(result.size() >= 2);
 	return result;
 }
 
