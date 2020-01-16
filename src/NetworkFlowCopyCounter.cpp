@@ -189,10 +189,14 @@ private:
 	size_t offset;
 };
 
+constexpr double plusUlp(double x)
+{
+	return std::nextafter(x, std::numeric_limits<double>::infinity());
+}
+
 // https://en.wikipedia.org/wiki/Bellman%E2%80%93Ford_algorithm
 std::vector<std::pair<size_t, bool>> getNegativeCycle(const FlowGraph& graph, const size_t start, const size_t end)
 {
-	constexpr double delta = 0.0001;
 	static OffsetedVector<double> distances;
 	static OffsetedVector<std::pair<size_t, bool>> from;
 	static std::vector<size_t> posInPath;
@@ -207,9 +211,9 @@ std::vector<std::pair<size_t, bool>> getNegativeCycle(const FlowGraph& graph, co
 		for (size_t i = 0; i < graph.edges.size(); i++)
 		{
 			if ((graph.edges[i].from == start && graph.edges[i].to == end) || (graph.edges[i].from == end && graph.edges[i].to == start)) continue;
-			if (graph.edges[i].used < graph.edges[i].capacity && distances[graph.edges[i].from ]!= std::numeric_limits<double>::infinity())
+			if (graph.edges[i].used < graph.edges[i].capacity && distances[graph.edges[i].from] != std::numeric_limits<double>::infinity())
 			{
-				if (distances[graph.edges[i].to] > distances[graph.edges[i].from] + graph.edges[i].cost + delta)
+				if (distances[graph.edges[i].to] > plusUlp(distances[graph.edges[i].from] + graph.edges[i].cost) && from[graph.edges[i].from].first != i)
 				{
 					from[graph.edges[i].to] = std::make_pair(i, true);
 					distances[graph.edges[i].to] = distances[graph.edges[i].from] + graph.edges[i].cost;
@@ -218,7 +222,7 @@ std::vector<std::pair<size_t, bool>> getNegativeCycle(const FlowGraph& graph, co
 			}
 			if (graph.edges[i].used > 0 && distances[graph.edges[i].to] != std::numeric_limits<double>::infinity())
 			{
-				if (distances[graph.edges[i].from] > distances[graph.edges[i].to] - graph.edges[i].cost + delta)
+				if (distances[graph.edges[i].from] > plusUlp(distances[graph.edges[i].to] - graph.edges[i].cost) && from[graph.edges[i].to].first != i)
 				{
 					from[graph.edges[i].from] = std::make_pair(i, false);
 					distances[graph.edges[i].from] = distances[graph.edges[i].to] - graph.edges[i].cost;
@@ -263,7 +267,7 @@ std::vector<std::pair<size_t, bool>> getNegativeCycle(const FlowGraph& graph, co
 			if ((graph.edges[i].from == start && graph.edges[i].to == end) || (graph.edges[i].from == end && graph.edges[i].to == start)) continue;
 			if (graph.edges[i].used < graph.edges[i].capacity)
 			{
-				if (distances[graph.edges[i].to] > distances[graph.edges[i].from] + graph.edges[i].cost + delta)
+				if (distances[graph.edges[i].to] > plusUlp(distances[graph.edges[i].from] + graph.edges[i].cost) && from[graph.edges[i].from].first != i)
 				{
 					from[graph.edges[i].to] = std::make_pair(i, true);
 					distances[graph.edges[i].to] = distances[graph.edges[i].from] + graph.edges[i].cost;
@@ -274,7 +278,7 @@ std::vector<std::pair<size_t, bool>> getNegativeCycle(const FlowGraph& graph, co
 			}
 			if (graph.edges[i].used > 0)
 			{
-				if (distances[graph.edges[i].from] > distances[graph.edges[i].to] - graph.edges[i].cost + delta)
+				if (distances[graph.edges[i].from] > plusUlp(distances[graph.edges[i].to] - graph.edges[i].cost) && from[graph.edges[i].to].first != i)
 				{
 					from[graph.edges[i].from] = std::make_pair(i, false);
 					distances[graph.edges[i].from] = distances[graph.edges[i].to] - graph.edges[i].cost;
@@ -606,7 +610,7 @@ int main(int argc, char** argv)
 	auto graph = GfaGraph::LoadFromFile(inGraph, true);
 	auto flowGraph = buildFlowGraph(graph, numChromosomes, onecopyCoverage);
 	solveFlow(flowGraph);
-	std::cout << "recalced coverage " << recalcCoverage(flowGraph, graph) << std::endl;
 	auto copycountConfidences = getCopycountConfidences(flowGraph);
+	std::cout << "recalced coverage " << recalcCoverage(flowGraph, graph) << std::endl;
 	outputFlow(flowGraph, graph, copycountConfidences, outputCsv);
 }
