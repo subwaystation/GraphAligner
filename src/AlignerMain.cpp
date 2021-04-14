@@ -319,9 +319,10 @@ int main(int argc, char** argv)
 		std::cerr << "--multimap-score-fraction cannot be more than 1" << std::endl;
 		paramError = true;
 	}
-	if (params.preciseClippingIdentityCutoff < 0.501 || params.preciseClippingIdentityCutoff > 0.999)
+
+	if (params.preciseClippingIdentityCutoff < 0.001 || params.preciseClippingIdentityCutoff > 0.999)
 	{
-		std::cerr << "precise clipping identity cutoff must be between 0.501 and 0.999" << std::endl;
+		std::cerr << "precise clipping identity cutoff must be between 0.001 and 0.999" << std::endl;
 		paramError = true;
 	}
 	if (params.Xdropcutoff < 1)
